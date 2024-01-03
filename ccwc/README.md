@@ -17,3 +17,9 @@ cargo run -- -l test.txt
 ```
 cargo run -- -w test.txt
 ```
+
+## Count number of characters
+
+```
+cargo run -- -m test.txt
+```

@@ -35,9 +35,17 @@ fn main() -> Result<(), Box<dyn Error>> {
             println!("{count} {file_name}")
         }
         "-m" => {
-            let mut buf = String::new();
-            buf_reader.read_to_string(&mut buf)?;
-            let count = buf.chars().count();
+            let mut count = 0;
+
+            loop {
+                let mut buf = vec![];
+                let num_bytes = buf_reader.read_until(b'\n', &mut buf)?;
+                if num_bytes == 0 {
+                    break;
+                }
+                let count_of_chars = String::from_utf8(buf)?.chars().count();
+                count += count_of_chars;
+            }
 
             println!("{count} {file_name}")
         }
