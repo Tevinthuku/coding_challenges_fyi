@@ -10,49 +10,95 @@ const SKIP_CHALLENGE_PATH: usize = 1;
 fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args().skip(SKIP_CHALLENGE_PATH);
 
-    let command = args.next().ok_or("Failed to get the command")?;
-    let file_name = args.next().ok_or("Failed to get the file name")?;
-
-    let file = File::open(&file_name)?;
-    let mut buf_reader = BufReader::new(file);
-
-    match command.as_str() {
-        "-c" => {
-            let count_of_bytes = buf_reader.bytes().count();
-            println!("{count_of_bytes} {file_name}");
-        }
-        "-l" => {
-            let lines = buf_reader.lines().count();
-            println!("{lines} {file_name}")
-        }
-        "-w" => {
-            let mut count = 0;
-            for line in buf_reader.lines() {
-                let line = line?;
-                count += line.split_whitespace().count();
-            }
-
-            println!("{count} {file_name}")
-        }
-        "-m" => {
-            let mut count = 0;
-
-            loop {
-                let mut buf = vec![];
-                let num_bytes = buf_reader.read_until(b'\n', &mut buf)?;
-                if num_bytes == 0 {
-                    break;
-                }
-                let count_of_chars = String::from_utf8(buf)?.chars().count();
-                count += count_of_chars;
-            }
-
-            println!("{count} {file_name}")
-        }
-        command => {
-            return Err(format!("Unexpected command {command} expected -c").into());
-        }
+    let maybe_command_or_file_name = args.next().ok_or("Failed to get the command")?;
+    if maybe_command_or_file_name.starts_with('-') {
+        let file_name = args.next().ok_or("Failed to get the file name")?;
+        let buf_reader = new_buf_reader(&file_name)?;
+        let count = run_command(&maybe_command_or_file_name, buf_reader)?;
+        println!("{count} {file_name}");
+        return Ok(());
     }
 
+    let file_name = maybe_command_or_file_name;
+    let mut reader = new_buf_reader(&file_name)?;
+
+    let char_count = char_count(&mut reader)?;
+    let LineAndWords {
+        line_count,
+        word_count,
+    } = line_and_word_count(reader)?;
+
+    println!("{char_count} {line_count} {word_count} {file_name}");
     Ok(())
+}
+
+fn new_buf_reader(file_name: &str) -> Result<BufReader<File>, Box<dyn Error>> {
+    let file = File::open(file_name)
+        .map_err(|err| format!("{err:?} : file_name provided = {file_name}"))?;
+    let buf_reader = BufReader::new(file);
+
+    Ok(buf_reader)
+}
+
+fn run_command(command: &str, mut buf_reader: BufReader<File>) -> Result<usize, Box<dyn Error>> {
+    let count = match command {
+        "-c" => byte_count(buf_reader),
+        "-l" => line_count(buf_reader)?,
+        "-w" => word_count(buf_reader)?,
+        "-m" => char_count(&mut buf_reader)?,
+        command => {
+            return Err(
+                format!("Unexpected command {command} expected either -c | -l | -w | -m").into(),
+            );
+        }
+    };
+
+    Ok(count)
+}
+
+fn byte_count(reader: BufReader<File>) -> usize {
+    reader.bytes().count()
+}
+
+fn line_count(reader: BufReader<File>) -> std::io::Result<usize> {
+    line_and_word_count(reader).map(|res| res.line_count)
+}
+
+fn word_count(reader: BufReader<File>) -> std::io::Result<usize> {
+    line_and_word_count(reader).map(|res| res.word_count)
+}
+
+struct LineAndWords {
+    line_count: usize,
+    word_count: usize,
+}
+
+fn line_and_word_count(reader: BufReader<File>) -> std::io::Result<LineAndWords> {
+    let mut word_count = 0;
+    let mut line_count = 0;
+    for line in reader.lines() {
+        let line = line?;
+        line_count += 1;
+        word_count += line.split_whitespace().count();
+    }
+    Ok(LineAndWords {
+        line_count,
+        word_count,
+    })
+}
+
+fn char_count(reader: &mut BufReader<File>) -> Result<usize, Box<dyn Error>> {
+    let mut count = 0;
+
+    loop {
+        let mut buf = vec![];
+        let num_bytes = reader.read_until(b'\n', &mut buf)?;
+        if num_bytes == 0 {
+            break;
+        }
+        let count_of_chars = String::from_utf8(buf)?.chars().count();
+        count += count_of_chars;
+    }
+
+    Ok(count)
 }
