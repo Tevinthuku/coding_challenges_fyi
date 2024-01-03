@@ -14,7 +14,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let file_name = args.next().ok_or("Failed to get the file name")?;
 
     let file = File::open(&file_name)?;
-    let buf_reader = BufReader::new(file);
+    let mut buf_reader = BufReader::new(file);
 
     match command.as_str() {
         "-c" => {
@@ -31,6 +31,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let line = line?;
                 count += line.split_whitespace().count();
             }
+
+            println!("{count} {file_name}")
+        }
+        "-m" => {
+            let mut buf = String::new();
+            buf_reader.read_to_string(&mut buf)?;
+            let count = buf.chars().count();
 
             println!("{count} {file_name}")
         }
