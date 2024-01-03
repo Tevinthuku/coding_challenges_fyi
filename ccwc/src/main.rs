@@ -29,12 +29,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             let mut count = 0;
             for line in buf_reader.lines() {
                 let line = line?;
-                let sp = line.split_whitespace();
-                for c in sp {
-                    if c != " " {
-                        count += 1;
-                    }
-                }
+                count += line.split_whitespace().count();
             }
 
             println!("{count} {file_name}")

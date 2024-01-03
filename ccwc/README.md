@@ -11,3 +11,9 @@ cargo run -- -c test.txt
 ```
 cargo run -- -l test.txt
 ```
+
+## Count of words
+
+```
+cargo run -- -w test.txt
+```
