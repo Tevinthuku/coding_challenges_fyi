@@ -3,3 +3,5 @@
 members = [
     "ccwc",
 ]
+
+workspace.resolver = "2"

@@ -16,7 +16,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         let maybe_file_name = args.next();
         let reader = get_reader(maybe_file_name.clone())?;
         let count = run_command(&maybe_command_or_file_name, reader)?;
-        // when the file_name is not given in the args, we should default to an empty string
         let file_name = maybe_file_name.unwrap_or_default();
         println!("{count} {file_name}");
         return Ok(());
