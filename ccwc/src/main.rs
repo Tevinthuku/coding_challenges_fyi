@@ -25,6 +25,20 @@ fn main() -> Result<(), Box<dyn Error>> {
             let lines = buf_reader.lines().count();
             println!("{lines} {file_name}")
         }
+        "-w" => {
+            let mut count = 0;
+            for line in buf_reader.lines() {
+                let line = line?;
+                let sp = line.split_whitespace();
+                for c in sp {
+                    if c != " " {
+                        count += 1;
+                    }
+                }
+            }
+
+            println!("{count} {file_name}")
+        }
         command => {
             return Err(format!("Unexpected command {command} expected -c").into());
         }
