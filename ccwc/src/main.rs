@@ -12,7 +12,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let command = args.next().ok_or("Failed to get the command")?;
     let file_name = args.next().ok_or("Failed to get the file name")?;
     if command != "-c" {
-        return Err(format!("Unexpected command {command} expected c").into());
+        return Err(format!("Unexpected command {command} expected -c").into());
     }
 
     let file = File::open(&file_name)?;
