@@ -23,3 +23,9 @@ cargo run -- -w test.txt
 ```
 cargo run -- -m test.txt
 ```
+
+## Read from command line
+
+```
+cat test.txt | cargo run -- -l
+```
