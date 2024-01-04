@@ -3,7 +3,7 @@ use std::error::Error;
 mod parser;
 mod tokenizer;
 
-pub fn parse_json(input: &str) -> Result<(), Box<dyn Error>> {
+pub fn parse_json(input: &'static str) -> Result<(), Box<dyn Error>> {
     let tokens = tokenizer::tokenize(input);
     parser::parse(tokens)?;
 
@@ -21,7 +21,7 @@ mod tests {
     #[case(include_str!("../tests/step1/valid.json"), true)]
     #[case(include_str!("../tests/step1/invalid.json"), false)]
 
-    fn test_parsing_input(#[case] input: &str, #[case] expected: bool) {
+    fn test_parsing_input(#[case] input: &'static str, #[case] expected: bool) {
         let is_ok = parse_json(input).is_ok();
 
         assert_eq!(is_ok, expected)
