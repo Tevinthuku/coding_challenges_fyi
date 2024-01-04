@@ -26,7 +26,7 @@ impl Parser {
             .ok_or("Expected {")?;
         // count_of_tokens == 2 symbolizes that we only have 2 tokens ['{', '}']
         // Its possible that the 2 tokens might not be the opening and closing brackets
-        // but this will be caught above at the _opening_bracket check and at the beginning of the loop for the closing bracket.
+        // but this will be caught above at the _opening_bracket check and at the beginning of the loop for the closing bracket at the end_of_json check.
         let mut end_of_content = self.count_of_tokens == 2;
         loop {
             let end_of_json = self.input.next_if_eq(&Token::RightBracket);
