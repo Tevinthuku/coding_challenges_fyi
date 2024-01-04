@@ -58,11 +58,11 @@ impl Parser {
             Some(token) => return Err(format!("Did not expect {token:?}").into()),
             None => return Err("Unexpected end of file".into()),
         }
-        let no_comma_found = self
+        let end_of_content = self
             .input
             .next_if(|token| matches!(token, Token::Comma))
             .is_none();
-        Ok(no_comma_found)
+        Ok(end_of_content)
     }
 }
 
