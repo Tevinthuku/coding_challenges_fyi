@@ -5,3 +5,7 @@ version = 3
 [[package]]
 name = "ccwc"
 version = "0.1.0"
+
+[[package]]
+name = "json-parser"
+version = "0.1.0"

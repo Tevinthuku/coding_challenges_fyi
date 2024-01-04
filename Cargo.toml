@@ -1,5 +1,7 @@
 [workspace]
 
 members = [
-    "ccwc",
+    "ccwc", "json-parser",
 ]
+
+resolver = "2"
