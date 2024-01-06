@@ -42,20 +42,29 @@ impl Parser {
 
             let _semi_colon = self.input.next_if_eq(&Token::Colon).ok_or("Expected :")?;
 
-            let end_of_content = self.parse_value_content()?;
+            self.parse_value_content()?;
 
-            if end_of_content {
-                let _closing_bracket = self
-                    .input
-                    .next_if_eq(&Token::RightCurlyBracket)
-                    .ok_or("Expected } closing the json")?;
-                break;
-            };
+            let maybe_comma_or_closing_bracket = self.next().ok_or("Unexpected end of file")?;
+
+            match maybe_comma_or_closing_bracket {
+                Token::Comma => {
+                    continue;
+                }
+                Token::RightCurlyBracket => {
+                    break;
+                }
+                token => {
+                    return Err(format!(
+                        "Expected either comma, or closing bracket, but found {token:?}"
+                    )
+                    .into())
+                }
+            }
         }
         Ok(())
     }
 
-    fn parse_value_content(&mut self) -> Result<bool, Box<dyn Error>> {
+    fn parse_value_content(&mut self) -> Result<(), Box<dyn Error>> {
         let token = self.next().ok_or("Unexpected end of file")?;
         match token {
             Token::LeftSquareBracket => {
@@ -63,14 +72,14 @@ impl Parser {
             }
             Token::Boolean | Token::Digit | Token::String(_) | Token::Null => {}
             Token::LeftCurlyBracket => self.parse_object_content()?,
-            token => return Err(format!("Unexpected token while parsing content {token:?}").into()),
+            token => {
+                return Err(
+                    format!("Unexpected token while parsing value content {token:?}").into(),
+                )
+            }
         }
 
-        let end_of_content = self
-            .input
-            .next_if(|token| matches!(token, Token::Comma))
-            .is_none();
-        Ok(end_of_content)
+        Ok(())
     }
 
     fn parse_array(&mut self) -> Result<(), Box<dyn Error>> {
