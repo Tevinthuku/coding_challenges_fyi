@@ -2,17 +2,22 @@ use std::{error::Error, iter::Peekable};
 
 use crate::tokenizer::Token;
 
+const EMPTY_JSON_TOKEN_COUNT: usize = 2;
+
 struct Parser {
     count_of_tokens: usize,
     input: Peekable<std::vec::IntoIter<Token>>,
 }
 
 impl Parser {
-    fn new(tokens: Vec<Token>) -> Self {
-        Self {
+    fn new(tokens: Vec<Token>) -> Result<Self, &'static str> {
+        if tokens.len() < EMPTY_JSON_TOKEN_COUNT {
+            return Err("Invalid json. Not enough tokens provided");
+        }
+        Ok(Self {
             count_of_tokens: tokens.len(),
             input: tokens.into_iter().peekable(),
-        }
+        })
     }
 
     fn next(&mut self) -> Option<Token> {
@@ -24,22 +29,20 @@ impl Parser {
             .input
             .next_if_eq(&Token::LeftBracket)
             .ok_or("Expected {")?;
-        // count_of_tokens == 2 symbolizes that we only have 2 tokens ['{', '}']
-        // Its possible that the 2 tokens might not be the opening and closing brackets
-        // but this will be caught above at the _opening_bracket check and at the beginning of the loop for the closing bracket at the end_of_json check.
-        let mut end_of_content = self.count_of_tokens == 2;
+        if self.count_of_tokens == EMPTY_JSON_TOKEN_COUNT {
+            self.input
+                .next_if_eq(&Token::RightBracket)
+                .ok_or("Expected }")?;
+            return Ok(());
+        }
         loop {
-            let end_of_json = self.input.next_if_eq(&Token::RightBracket);
-            if end_of_json.is_some() && end_of_content {
-                return Ok(());
-            }
             let _json_key = self
                 .input
                 .next_if(|token| matches!(token, Token::String(_)))
                 .ok_or("Expected a string based key")?;
             let _semi_colon = self.input.next_if_eq(&Token::Colon).ok_or("Expected :")?;
 
-            end_of_content = self.parse_content()?;
+            let end_of_content = self.parse_content()?;
             if end_of_content {
                 let _closing_bracket = self
                     .input
@@ -67,6 +70,6 @@ impl Parser {
 }
 
 pub fn parse(tokens: Vec<Token>) -> Result<(), Box<dyn Error>> {
-    let mut parser = Parser::new(tokens);
+    let mut parser = Parser::new(tokens)?;
     parser.parse()
 }
