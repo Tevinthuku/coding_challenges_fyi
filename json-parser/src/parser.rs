@@ -5,7 +5,6 @@ use crate::tokenizer::Token;
 const EMPTY_JSON_TOKEN_COUNT: usize = 2;
 
 struct Parser {
-    count_of_tokens: usize,
     input: Peekable<std::vec::IntoIter<Token>>,
 }
 
@@ -15,7 +14,6 @@ impl Parser {
             return Err("Invalid json. Not enough tokens provided");
         }
         Ok(Self {
-            count_of_tokens: tokens.len(),
             input: tokens.into_iter().peekable(),
         })
     }
@@ -27,43 +25,70 @@ impl Parser {
     fn parse(&mut self) -> Result<(), Box<dyn Error>> {
         let _opening_bracket = self
             .input
-            .next_if_eq(&Token::LeftBracket)
+            .next_if_eq(&Token::LeftCurlyBracket)
             .ok_or("Expected {")?;
-        if self.count_of_tokens == EMPTY_JSON_TOKEN_COUNT {
-            self.input
-                .next_if_eq(&Token::RightBracket)
-                .ok_or("Expected }")?;
+        self.parse_object()
+    }
+
+    fn parse_object(&mut self) -> Result<(), Box<dyn Error>> {
+        if self.input.next_if_eq(&Token::RightCurlyBracket).is_some() {
             return Ok(());
         }
         loop {
             let _json_key = self
                 .input
                 .next_if(|token| matches!(token, Token::String(_)))
-                .ok_or("Expected a string based key")?;
+                .ok_or("Expected a String based key")?;
+
             let _semi_colon = self.input.next_if_eq(&Token::Colon).ok_or("Expected :")?;
 
             let end_of_content = self.parse_content()?;
+
             if end_of_content {
                 let _closing_bracket = self
                     .input
-                    .next_if_eq(&Token::RightBracket)
+                    .next_if_eq(&Token::RightCurlyBracket)
                     .ok_or("Expected } closing the json")?;
                 break;
-            }
+            };
         }
-
         Ok(())
     }
 
     fn parse_content(&mut self) -> Result<bool, Box<dyn Error>> {
-        if self.next().is_none() {
-            return Err("Unexpected end of file".into());
+        let token = self.next().ok_or("Unexpected end of file")?;
+        match token {
+            Token::LeftSquareBracket => {
+                self.parse_array()?;
+            }
+            Token::Boolean | Token::Digit | Token::String(_) | Token::Null => {}
+            Token::LeftCurlyBracket => self.parse_object()?,
+            token => return Err(format!("Unexpected token while parsing content {token:?}").into()),
         }
+
         let end_of_content = self
             .input
             .next_if(|token| matches!(token, Token::Comma))
             .is_none();
         Ok(end_of_content)
+    }
+
+    fn parse_array(&mut self) -> Result<(), Box<dyn Error>> {
+        loop {
+            let peeked_next = self.input.peek().ok_or("Unexpected end of input")?;
+            if peeked_next == &Token::RightSquareBracket {
+                break;
+            } else {
+                self.parse_content()?;
+            }
+        }
+
+        let _closing_bracket = self
+            .input
+            .next_if_eq(&Token::RightSquareBracket)
+            .ok_or("Expected ] to close the array")?;
+
+        Ok(())
     }
 }
 

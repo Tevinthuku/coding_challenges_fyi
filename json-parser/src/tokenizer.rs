@@ -2,14 +2,16 @@ use std::{error::Error, iter::Peekable};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum Token {
-    LeftBracket,
-    RightBracket,
+    LeftCurlyBracket,
+    RightCurlyBracket,
     Colon,
     Comma,
     String(String),
     Boolean,
     Null,
     Digit,
+    LeftSquareBracket,
+    RightSquareBracket,
 }
 
 struct Tokenizer {
@@ -38,7 +40,7 @@ impl Tokenizer {
         Ok(result)
     }
 
-    fn identifier(&mut self, initial_char: char) -> Result<Token, &'static str> {
+    fn identifier(&mut self, initial_char: char) -> Result<Token, Box<dyn Error>> {
         let mut maybe_identifier = initial_char.to_string();
         while let Some(i) = self.input.next_if(|c| c.is_alphanumeric()) {
             maybe_identifier.push(i);
@@ -47,7 +49,7 @@ impl Tokenizer {
             "true" => Token::Boolean,
             "false" => Token::Boolean,
             "null" => Token::Null,
-            _ => return Err("Unknown identifier"),
+            identifier => return Err(format!("Unpexpected identifier {identifier}").into()),
         };
         Ok(identifier)
     }
@@ -80,14 +82,16 @@ impl Iterator for Tokenizer {
     fn next(&mut self) -> Option<Self::Item> {
         let ch = self.input.next()?;
         match ch {
-            '{' => Some(Ok(Token::LeftBracket)),
-            '}' => Some(Ok(Token::RightBracket)),
+            '{' => Some(Ok(Token::LeftCurlyBracket)),
+            '}' => Some(Ok(Token::RightCurlyBracket)),
             '"' => Some(self.string().map(Token::String)),
             ':' => Some(Ok(Token::Colon)),
             ',' => Some(Ok(Token::Comma)),
+            '[' => Some(Ok(Token::LeftSquareBracket)),
+            ']' => Some(Ok(Token::RightSquareBracket)),
             c if c.is_whitespace() => self.next(),
             c if c.is_numeric() => Some(self.digit(c)),
-            identifier => Some(self.identifier(identifier).map_err(Into::into)),
+            identifier => Some(self.identifier(identifier)),
         }
     }
 }
