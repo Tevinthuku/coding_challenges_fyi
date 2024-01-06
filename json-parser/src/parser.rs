@@ -27,10 +27,10 @@ impl Parser {
             .input
             .next_if_eq(&Token::LeftCurlyBracket)
             .ok_or("Expected {")?;
-        self.parse_object()
+        self.parse_object_content()
     }
 
-    fn parse_object(&mut self) -> Result<(), Box<dyn Error>> {
+    fn parse_object_content(&mut self) -> Result<(), Box<dyn Error>> {
         if self.input.next_if_eq(&Token::RightCurlyBracket).is_some() {
             return Ok(());
         }
@@ -42,7 +42,7 @@ impl Parser {
 
             let _semi_colon = self.input.next_if_eq(&Token::Colon).ok_or("Expected :")?;
 
-            let end_of_content = self.parse_content()?;
+            let end_of_content = self.parse_value_content()?;
 
             if end_of_content {
                 let _closing_bracket = self
@@ -55,14 +55,14 @@ impl Parser {
         Ok(())
     }
 
-    fn parse_content(&mut self) -> Result<bool, Box<dyn Error>> {
+    fn parse_value_content(&mut self) -> Result<bool, Box<dyn Error>> {
         let token = self.next().ok_or("Unexpected end of file")?;
         match token {
             Token::LeftSquareBracket => {
                 self.parse_array()?;
             }
             Token::Boolean | Token::Digit | Token::String(_) | Token::Null => {}
-            Token::LeftCurlyBracket => self.parse_object()?,
+            Token::LeftCurlyBracket => self.parse_object_content()?,
             token => return Err(format!("Unexpected token while parsing content {token:?}").into()),
         }
 
@@ -75,11 +75,11 @@ impl Parser {
 
     fn parse_array(&mut self) -> Result<(), Box<dyn Error>> {
         loop {
-            let peeked_next = self.input.peek().ok_or("Unexpected end of input")?;
-            if peeked_next == &Token::RightSquareBracket {
+            let peeked = self.input.peek().ok_or("Unexpected end of input")?;
+            if peeked == &Token::RightSquareBracket {
                 break;
             } else {
-                self.parse_content()?;
+                self.parse_value_content()?;
             }
         }
 
