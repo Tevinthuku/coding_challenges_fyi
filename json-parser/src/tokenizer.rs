@@ -7,6 +7,9 @@ pub(crate) enum Token {
     Colon,
     Comma,
     String(String),
+    Boolean,
+    Null,
+    Digit,
 }
 
 struct Tokenizer {
@@ -34,6 +37,41 @@ impl Tokenizer {
         }
         Ok(result)
     }
+
+    fn identifier(&mut self, initial_char: char) -> Result<Token, &'static str> {
+        let mut maybe_identifier = initial_char.to_string();
+        while let Some(i) = self.input.next_if(|c| c.is_alphanumeric()) {
+            maybe_identifier.push(i);
+        }
+        let identifier = match maybe_identifier.as_str() {
+            "true" => Token::Boolean,
+            "false" => Token::Boolean,
+            "null" => Token::Null,
+            _ => return Err("Unknown identifier"),
+        };
+        Ok(identifier)
+    }
+
+    fn digit(&mut self, initial_digit: char) -> Result<Token, Box<dyn Error>> {
+        let mut maybe_digit = initial_digit.to_string();
+
+        while let Some(i) = self.input.next_if(|c| c.is_numeric()) {
+            maybe_digit.push(i);
+        }
+
+        if let Some(i) = self.input.next_if_eq(&'.') {
+            maybe_digit.push(i);
+
+            while let Some(i) = self.input.next_if(|c| c.is_numeric()) {
+                maybe_digit.push(i);
+            }
+        }
+
+        maybe_digit
+            .parse::<f64>()
+            .map(|_| Token::Digit)
+            .map_err(|_| "Failed to parse the digit".into())
+    }
 }
 
 impl Iterator for Tokenizer {
@@ -48,7 +86,8 @@ impl Iterator for Tokenizer {
             ':' => Some(Ok(Token::Colon)),
             ',' => Some(Ok(Token::Comma)),
             c if c.is_whitespace() => self.next(),
-            c => Some(Err(format!("Unexpected token {c:?}").into())),
+            c if c.is_numeric() => Some(self.digit(c)),
+            identifier => Some(self.identifier(identifier).map_err(Into::into)),
         }
     }
 }

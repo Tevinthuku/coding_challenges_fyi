@@ -22,6 +22,8 @@ mod tests {
     #[case(include_str!("../tests/step2/valid2.json"), true)]
     #[case(include_str!("../tests/step2/invalid.json"), false)]
     #[case(include_str!("../tests/step2/invalid2.json"), false)]
+    #[case(include_str!("../tests/step3/valid.json"), true)]
+    #[case(include_str!("../tests/step3/invalid.json"), false)]
 
     fn test_parsing_input(#[case] input: &'static str, #[case] expected: bool) {
         let is_ok = parse_json(input)

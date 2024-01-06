@@ -56,10 +56,8 @@ impl Parser {
     }
 
     fn parse_content(&mut self) -> Result<bool, Box<dyn Error>> {
-        match self.next() {
-            Some(Token::String(_)) => {}
-            Some(token) => return Err(format!("Did not expect {token:?}").into()),
-            None => return Err("Unexpected end of file".into()),
+        if self.next().is_none() {
+            return Err("Unexpected end of file".into());
         }
         let end_of_content = self
             .input
