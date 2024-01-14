@@ -1,12 +1,11 @@
 use std::cmp::Ordering;
 
-use binary_search_tree::BinarySearchTree;
 use itertools::Itertools;
 
 #[derive(Clone, Debug)]
 pub struct Tree {
     pub weight: usize,
-    inner: BinarySearchTree<Value>,
+    inner: BinarySearchTree,
 }
 
 impl From<(char, usize)> for Tree {
@@ -20,16 +19,84 @@ impl From<(char, usize)> for Tree {
     }
 }
 
+#[derive(Debug, Clone)]
+struct BinarySearchTree {
+    root: TreeInner,
+}
+
+impl Extend<Value> for BinarySearchTree {
+    fn extend<I: IntoIterator<Item = Value>>(&mut self, iter: I) {
+        iter.into_iter().for_each(move |elem| {
+            self.insert(elem);
+        });
+    }
+}
+
+impl BinarySearchTree {
+    pub fn new() -> Self {
+        BinarySearchTree {
+            root: TreeInner(None),
+        }
+    }
+    pub fn insert(&mut self, value: Value) {
+        self.root.insert(value)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Node {
+    value: Value,
+    left: TreeInner,
+    right: TreeInner,
+}
+
+impl Node {
+    pub fn new(value: Value) -> Self {
+        Node {
+            value,
+            left: TreeInner(None),
+            right: TreeInner(None),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct TreeInner(Option<Box<Node>>);
+
+impl TreeInner {
+    pub fn insert(&mut self, value: Value) {
+        let mut current = self;
+
+        while let Some(ref mut node) = current.0 {
+            match node.value.cmp(&value) {
+                Ordering::Greater => current = &mut node.left,
+                Ordering::Less => current = &mut node.right,
+                Ordering::Equal => {
+                    current = &mut node.right;
+                }
+            }
+        }
+
+        current.0 = Some(Box::new(Node::new(value)));
+    }
+
+    pub fn into_sorted_vec(self) -> Vec<Value> {
+        let mut elements = Vec::new();
+
+        if let Some(node) = self.0 {
+            elements.extend(node.left.into_sorted_vec());
+            elements.push(node.value);
+            elements.extend(node.right.into_sorted_vec());
+        }
+
+        elements
+    }
+}
+
 impl Tree {
     pub fn new(data: impl IntoIterator<Item = (char, usize)>) -> Option<Self> {
         let trees = Trees::from_iter(data.into_iter().map_into());
         trees.merge()
-    }
-
-    fn merge(mut self, other: Tree) -> Self {
-        self.inner.extend(other.inner.into_sorted_vec());
-        self.weight += other.weight;
-        self
     }
 }
 
@@ -44,7 +111,7 @@ enum Value {
 }
 
 impl Value {
-    fn cmp_value(&self) -> usize {
+    fn weight(&self) -> usize {
         match self {
             Value::WeightSum(val) => *val,
             Value::Leaf { ch: _, count } => *count,
@@ -54,7 +121,7 @@ impl Value {
 
 impl Ord for Value {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.cmp_value().cmp(&other.cmp_value())
+        self.weight().cmp(&other.weight())
     }
 }
 
@@ -93,7 +160,15 @@ impl Trees {
                     lowest,
                     second_lowest,
                 } => {
-                    let new_tree = lowest.merge(second_lowest);
+                    let new_tree_weight = lowest.weight + second_lowest.weight;
+                    let mut new_merged_tree = BinarySearchTree::new();
+                    new_merged_tree.insert(Value::WeightSum(new_tree_weight));
+                    new_merged_tree.extend(second_lowest.inner.root.into_sorted_vec());
+                    new_merged_tree.extend(lowest.inner.root.into_sorted_vec());
+                    let new_tree = Tree {
+                        weight: new_tree_weight,
+                        inner: new_merged_tree,
+                    };
                     self.insert(new_tree);
                 }
                 PopResult::Single(tree) => {
@@ -149,7 +224,7 @@ mod tests {
         ];
 
         let tree = Tree::new(char_mapping).unwrap();
-
+        println!("{tree:?}");
         assert_eq!(tree.weight, 306);
     }
 }
