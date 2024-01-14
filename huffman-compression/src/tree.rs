@@ -1,70 +1,70 @@
-use std::cmp::Ordering;
+use std::{cmp::Ordering, collections::HashMap, error::Error};
 
 use itertools::Itertools;
 
 #[derive(Debug, Clone)]
-pub struct BinarySearchTree {
-    weight: usize,
-    root: Tree,
-}
+pub struct Tree(Option<Box<Node>>);
 
-impl From<(char, usize)> for BinarySearchTree {
+impl From<(char, usize)> for Tree {
     fn from((ch, count): (char, usize)) -> Self {
         let val = Value::Leaf { ch, count };
-        BinarySearchTree::new_with_value(val)
+        let node = Node::new(val);
+        Self(Some(Box::new(node)))
     }
 }
-
-impl Extend<Value> for BinarySearchTree {
-    fn extend<I: IntoIterator<Item = Value>>(&mut self, iter: I) {
-        iter.into_iter().for_each(move |elem| {
-            self.insert(elem);
-        });
-    }
-}
-
-impl BinarySearchTree {
-    fn new_with_value(value: Value) -> Self {
-        BinarySearchTree {
-            weight: value.weight(),
-            root: Tree(Some(Box::new(Node::new(value)))),
-        }
-    }
-    fn insert(&mut self, value: Value) {
-        self.root.insert(value)
-    }
-}
-
-#[derive(Debug, Clone)]
-struct Tree(Option<Box<Node>>);
 
 impl Tree {
-    pub fn insert(&mut self, value: Value) {
-        let mut current = self;
-
-        while let Some(ref mut node) = current.0 {
-            match node.value.cmp(&value) {
-                Ordering::Greater => current = &mut node.left,
-                Ordering::Less => current = &mut node.right,
-                Ordering::Equal => {
-                    current = &mut node.right;
-                }
-            }
-        }
-
-        current.0 = Some(Box::new(Node::new(value)));
+    fn char(&self) -> char {
+        self.0
+            .as_ref()
+            .and_then(|node| match node.value {
+                Value::Leaf { ch, count: _ } => Some(ch),
+                _ => None,
+            })
+            .unwrap_or_default()
     }
 
-    pub fn into_sorted_vec(self) -> Vec<Value> {
-        let mut elements = Vec::new();
+    pub fn new(values: impl IntoIterator<Item = (char, usize)>) -> Option<Self> {
+        let trees = Trees::from_iter(values.into_iter().map_into());
+        trees.merge()
+    }
 
-        if let Some(node) = self.0 {
-            elements.extend(node.left.into_sorted_vec());
-            elements.push(node.value);
-            elements.extend(node.right.into_sorted_vec());
+    fn weight(&self) -> usize {
+        self.0
+            .as_ref()
+            .map(|n| n.value.weight())
+            .unwrap_or(usize::MIN)
+    }
+
+    fn generate_codes(self) -> Result<HashMap<char, CodeAndFrequency>, Box<dyn Error>> {
+        let mut result = HashMap::new();
+        self.generate_codes_inner(Default::default(), &mut result)?;
+        Ok(result)
+    }
+
+    fn generate_codes_inner(
+        self,
+        current_code: String,
+        result: &mut HashMap<char, CodeAndFrequency>,
+    ) -> Result<(), Box<dyn Error>> {
+        if let Some(current) = self.0 {
+            let left = current.left;
+            left.generate_codes_inner(format!("{current_code}0"), result)?;
+            if let Value::Leaf { ch, count } = current.value {
+                let code = current_code.parse()?;
+                result.insert(
+                    ch,
+                    CodeAndFrequency {
+                        frequency: count,
+                        code,
+                    },
+                );
+            };
+            let right = current.right;
+            right.generate_codes_inner(format!("{current_code}1"), result)
+        } else {
+            Ok(())
         }
-
-        elements
     }
 }
 
@@ -85,15 +85,17 @@ impl Node {
     }
 }
 
-impl BinarySearchTree {
-    pub fn new(data: impl IntoIterator<Item = (char, usize)>) -> Option<Self> {
-        let trees = Trees::from_iter(data.into_iter().map_into());
-        trees.merge()
-    }
+#[derive(Debug)]
+struct CodeAndFrequency {
+    frequency: usize,
+    code: usize,
 }
 
-fn cmp_tree_by_weight_desc(a: &BinarySearchTree, b: &BinarySearchTree) -> Ordering {
-    b.weight.cmp(&a.weight)
+fn cmp_tree_desc(a: &Tree, b: &Tree) -> Ordering {
+    if b.weight() == a.weight() {
+        return b.char().cmp(&a.char());
+    }
+    b.weight().cmp(&a.weight())
 }
 
 #[derive(Clone, Debug)]
@@ -130,35 +132,31 @@ impl PartialEq for Value {
     }
 }
 
-struct Trees(Vec<BinarySearchTree>);
+struct Trees(Vec<Tree>);
 
-impl FromIterator<BinarySearchTree> for Trees {
-    fn from_iter<T: IntoIterator<Item = BinarySearchTree>>(iter: T) -> Self {
-        let sorted_trees = iter
-            .into_iter()
-            .sorted_by(cmp_tree_by_weight_desc)
-            .collect_vec();
-
+impl FromIterator<Tree> for Trees {
+    fn from_iter<T: IntoIterator<Item = Tree>>(iter: T) -> Self {
+        let sorted_trees = iter.into_iter().sorted_by(cmp_tree_desc).collect_vec();
         Self(sorted_trees)
     }
 }
 
 impl Trees {
-    fn merge(mut self) -> Option<BinarySearchTree> {
+    fn merge(mut self) -> Option<Tree> {
         loop {
             let result = self.pop_lowest()?;
             match result {
-                PopResult::TreesToMerge {
-                    lowest,
-                    second_lowest,
-                } => {
-                    let new_tree_weight = lowest.weight + second_lowest.weight;
-                    let mut new_merged_tree =
-                        BinarySearchTree::new_with_value(Value::WeightSum(new_tree_weight));
-                    new_merged_tree.extend(second_lowest.root.into_sorted_vec());
-                    new_merged_tree.extend(lowest.root.into_sorted_vec());
+                PopResult::TreesToMerge { left, right } => {
+                    let new_tree_weight = left.weight() + right.weight();
 
-                    self.insert(new_merged_tree);
+                    let root_node = Node {
+                        value: Value::WeightSum(new_tree_weight),
+                        right,
+                        left,
+                    };
+                    let tree = Tree(Some(Box::new(root_node)));
+
+                    self.insert(tree);
                 }
                 PopResult::Single(tree) => {
                     return Some(tree);
@@ -168,54 +166,63 @@ impl Trees {
     }
 
     pub fn pop_lowest(&mut self) -> Option<PopResult> {
-        let lowest = self.0.pop()?;
+        let left = self.0.pop()?;
 
         let item_result = match self.0.pop() {
-            Some(second_lowest) => PopResult::TreesToMerge {
-                lowest,
-                second_lowest,
-            },
-            None => PopResult::Single(lowest),
+            Some(right) => PopResult::TreesToMerge { left, right },
+            None => PopResult::Single(left),
         };
 
         Some(item_result)
     }
 
-    fn insert(&mut self, tree: BinarySearchTree) {
+    fn insert(&mut self, tree: Tree) {
         self.0.push(tree);
-        self.0.sort_unstable_by(cmp_tree_by_weight_desc);
+        self.0.sort_unstable_by(cmp_tree_desc);
     }
 }
 
 enum PopResult {
-    TreesToMerge {
-        lowest: BinarySearchTree,
-        second_lowest: BinarySearchTree,
-    },
-    Single(BinarySearchTree),
+    TreesToMerge { left: Tree, right: Tree },
+    Single(Tree),
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::tree::BinarySearchTree;
+
+    use crate::tree::{CodeAndFrequency, Tree};
 
     #[test]
-    fn test_merging() {
+    fn test_code_generation() {
         // char_mapping test data comes from
         // https://opendsa-server.cs.vt.edu/ODSA/Books/CS3/html/Huffman.html
         let char_mapping = [
-            ('Z', 2),
-            ('K', 7),
-            ('M', 24),
             ('C', 32),
-            ('U', 37),
             ('D', 42),
-            ('L', 42),
             ('E', 120),
+            ('K', 7),
+            ('L', 42),
+            ('M', 24),
+            ('U', 37),
+            ('Z', 2),
         ];
 
-        let tree = BinarySearchTree::new(char_mapping).unwrap();
-        println!("{tree:?}");
-        assert_eq!(tree.weight, 306);
+        let tree = Tree::new(char_mapping).unwrap();
+        assert_eq!(tree.weight(), 306);
+        let mut codes = tree.generate_codes().unwrap();
+        let expected_codes = [
+            ('C', 1110),
+            ('D', 101),
+            ('E', 0),
+            ('K', 111101),
+            ('L', 110),
+            ('M', 11111),
+            ('U', 100),
+            ('Z', 111100),
+        ];
+        for (ch, expected_code) in expected_codes {
+            let CodeAndFrequency { code, frequency: _ } = codes.remove(&ch).unwrap();
+            assert_eq!(code, expected_code)
+        }
     }
 }
