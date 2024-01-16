@@ -2,6 +2,15 @@ use std::{cmp::Ordering, collections::HashMap, error::Error};
 
 use itertools::Itertools;
 
+type CodeMap = HashMap<char, Vec<u8>>;
+pub fn generate_codes(
+    values: impl IntoIterator<Item = (char, usize)>,
+) -> Result<Option<CodeMap>, Box<dyn Error>> {
+    Tree::new(values)
+        .map(|tree| tree.generate_codes())
+        .transpose()
+}
+
 #[derive(Debug, Clone)]
 pub struct Tree(Option<Box<Node>>);
 
@@ -36,32 +45,31 @@ impl Tree {
             .unwrap_or(usize::MIN)
     }
 
-    fn generate_codes(self) -> Result<HashMap<char, CodeAndFrequency>, Box<dyn Error>> {
+    fn generate_codes(self) -> Result<HashMap<char, Vec<u8>>, Box<dyn Error>> {
         let mut result = HashMap::new();
-        self.generate_codes_inner(Default::default(), &mut result)?;
+        let mut code = vec![];
+        self.generate_codes_inner(&mut code, &mut result)?;
         Ok(result)
     }
 
     fn generate_codes_inner(
         self,
-        current_code: String,
-        result: &mut HashMap<char, CodeAndFrequency>,
+        current_code: &mut Vec<u8>,
+        result: &mut HashMap<char, Vec<u8>>,
     ) -> Result<(), Box<dyn Error>> {
         if let Some(current) = self.0 {
             let left = current.left;
-            left.generate_codes_inner(format!("{current_code}0"), result)?;
-            if let Value::Leaf { ch, count } = current.value {
-                let code = current_code.parse()?;
-                result.insert(
-                    ch,
-                    CodeAndFrequency {
-                        frequency: count,
-                        code,
-                    },
-                );
+            current_code.push(0);
+            left.generate_codes_inner(current_code, result)?;
+            current_code.pop();
+            if let Value::Leaf { ch, count: _ } = current.value {
+                result.insert(ch, current_code.to_owned());
             };
             let right = current.right;
-            right.generate_codes_inner(format!("{current_code}1"), result)
+            current_code.push(1);
+            right.generate_codes_inner(current_code, result)?;
+            current_code.pop();
+            Ok(())
         } else {
             Ok(())
         }
@@ -86,9 +94,9 @@ impl Node {
 }
 
 #[derive(Debug)]
-struct CodeAndFrequency {
-    frequency: usize,
-    code: usize,
+pub struct CodeAndFrequency {
+    pub frequency: usize,
+    pub code: usize,
 }
 
 fn cmp_tree_desc(a: &Tree, b: &Tree) -> Ordering {
@@ -190,7 +198,7 @@ enum PopResult {
 #[cfg(test)]
 mod tests {
 
-    use crate::tree::{CodeAndFrequency, Tree};
+    use crate::code_generation::Tree;
 
     #[test]
     fn test_code_generation() {
@@ -211,18 +219,53 @@ mod tests {
         assert_eq!(tree.weight(), 306);
         let mut codes = tree.generate_codes().unwrap();
         let expected_codes = [
-            ('C', 1110),
-            ('D', 101),
-            ('E', 0),
-            ('K', 111101),
-            ('L', 110),
-            ('M', 11111),
-            ('U', 100),
-            ('Z', 111100),
+            ('C', vec![1_u8, 1, 1, 0]),
+            ('D', vec![1, 0, 1]),
+            ('E', vec![0]),
+            ('K', vec![1, 1, 1, 1, 0, 1]),
+            ('L', vec![1, 1, 0]),
+            ('M', vec![1, 1, 1, 1, 1]),
+            ('U', vec![1, 0, 0]),
+            ('Z', vec![1, 1, 1, 1, 0, 0]),
         ];
+
         for (ch, expected_code) in expected_codes {
-            let CodeAndFrequency { code, frequency: _ } = codes.remove(&ch).unwrap();
-            assert_eq!(code, expected_code)
+            let code = codes.get(&ch).unwrap();
+            assert_eq!(code, &expected_code)
         }
+    }
+
+    use bit_vec::BitVec;
+    use itertools::Itertools;
+
+    #[test]
+    fn test_bit_stuff() {
+        // Example Huffman codes
+        let huffman_codes: Vec<&str> = vec!["00", "01", "1"];
+
+        // Encode: Translate prefixes into bit strings and pack into bytes
+        let mut packed_bits = BitVec::new();
+        for code in &huffman_codes {
+            packed_bits.extend(code.chars().map(|bit| bit == '1'));
+        }
+
+        // // Padding: Add zeros to complete the last byte
+        let padding_size = (8 - packed_bits.len() % 8) % 8;
+        for _ in 0..padding_size {
+            packed_bits.push(false);
+        }
+
+        // Convert BitVec to bytes
+        let packed_bytes: Vec<u8> = packed_bits.to_bytes();
+
+        // Decode: Read bytes, unpack into bits
+        let unpacked_bits = BitVec::from_bytes(&packed_bytes);
+
+        // Print the results
+        println!("Huffman Codes: {:?}", huffman_codes);
+        println!("Packed Bytes: {:?} {}", packed_bytes, packed_bytes.len());
+        println!("Unpacked Bits: {:?}", unpacked_bits);
+        let unpacked_bytes: Vec<u8> = unpacked_bits.into_iter().map(Into::into).collect_vec();
+        println!("Unpacked Bytes {:?}", unpacked_bytes);
     }
 }

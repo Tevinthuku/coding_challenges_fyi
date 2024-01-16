@@ -1,4 +1,5 @@
-pub mod tree;
+pub mod code_generation;
+pub mod encode;
 
 use std::{
     collections::HashMap,
@@ -24,7 +25,6 @@ fn char_count_mapping(file_name: impl AsRef<str>) -> Result<HashMap<char, u32>, 
 
     let mapping = content
         .chars()
-        .filter(|ch| ch.is_alphanumeric())
         .into_grouping_map_by(|&x| x)
         .fold(0_u32, |acc, _key, _value| acc + 1);
 
