@@ -1,9 +1,9 @@
-pub fn unicode_decoding(input: char) -> char {
+pub fn unicode_decoding(input: &str) -> &str {
     match input {
-        '\u{0009}' => '\t',
-        '\u{000A}' => '\n',
-        '\u{000D}' => '\r',
-        '\u{0020}' => ' ',
+        "\\u{0009}" => "\t",
+        "\\u{000A}" => "\n",
+        "\\u{000D}" => "\r",
+        "\\u{0020}" => " ",
         c => c,
     }
 }

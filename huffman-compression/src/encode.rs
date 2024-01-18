@@ -8,7 +8,10 @@ use std::{
 use bit_vec::BitVec;
 use itertools::Itertools;
 
-use crate::{code_generation::generate_codes, whitespace::unicode_encoding};
+use crate::{
+    code_generation::generate_codes,
+    whitespace::{unicode_decoding, unicode_encoding},
+};
 
 fn write_header<W: Write>(
     writer: &mut W,
@@ -84,9 +87,14 @@ fn read_header<R: BufRead>(reader: &mut R) -> std::io::Result<HashMap<char, Vec<
     // Process header lines to build the prefix table
     let mut prefix_table: HashMap<char, Vec<u8>> = HashMap::new();
     for line in header_lines {
+        println!("line {line}");
         let parts: Vec<&str> = line.trim().split(':').collect();
         if parts.len() == 2 {
-            let character = parts[0].chars().next().unwrap_or_default();
+            let character = unicode_decoding(parts[0])
+                .chars()
+                .next()
+                .unwrap_or_default();
+            // println!("char found {character}");
             let code_as_str = parts[1];
             let bytes: Vec<u8> = serde_json::from_str(code_as_str)?;
             prefix_table.insert(character, bytes);
@@ -109,9 +117,10 @@ fn huffman_decode_2<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> std
 
         byte_buffer.extend(buffer);
 
+        println!("byte_buffer {byte_buffer:?}");
+
         for (ch, code_bytes) in huffman_codes.iter() {
             if code_bytes == &byte_buffer {
-                println!("{ch} char found");
                 write!(writer, "{}", ch)?;
                 byte_buffer.clear();
             }
