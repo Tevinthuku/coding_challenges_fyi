@@ -1,5 +1,6 @@
 use std::{cmp::Ordering, collections::HashMap, error::Error};
 
+use bit_vec::BitVec;
 use itertools::Itertools;
 
 type CodeMap = HashMap<char, Vec<u8>>;
@@ -49,6 +50,13 @@ impl Tree {
         let mut result = HashMap::new();
         let mut code = vec![];
         self.generate_codes_inner(&mut code, &mut result)?;
+        let result = result
+            .into_iter()
+            .map(|(ch, bytes)| {
+                let bit_vec = BitVec::<u8>::from_iter(bytes.into_iter().map(|b| b == 1)).to_bytes();
+                (ch, bit_vec)
+            })
+            .collect();
         Ok(result)
     }
 
@@ -198,7 +206,18 @@ enum PopResult {
 #[cfg(test)]
 mod tests {
 
-    use crate::code_generation::Tree;
+    use crate::{code_generation::Tree, whitespace::unicode_encoding};
+
+    #[test]
+    fn test_char_mapping() {
+        let content = include_str!("../135-0.txt");
+        let mapping = content
+            .chars()
+            .into_grouping_map_by(|&x| x)
+            .fold(0, |acc, _key, _value| acc + 1);
+        let result = generate_codes(mapping).unwrap().unwrap();
+        println!("{result:?}");
+    }
 
     #[test]
     fn test_code_generation() {
@@ -237,6 +256,8 @@ mod tests {
 
     use bit_vec::BitVec;
     use itertools::Itertools;
+
+    use super::generate_codes;
 
     #[test]
     fn test_bit_stuff() {

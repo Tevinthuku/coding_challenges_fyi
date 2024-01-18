@@ -1,5 +1,6 @@
 pub mod code_generation;
 pub mod encode;
+pub mod whitespace;
 
 use std::{
     collections::HashMap,
