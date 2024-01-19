@@ -5,6 +5,7 @@ use std::{
     io::{BufRead, BufReader, BufWriter, Write},
 };
 
+use bit_vec::BitVec;
 use itertools::Itertools;
 
 use crate::prefix_code_table::generate_codes;
@@ -16,10 +17,21 @@ fn encode<W: Write>(input_file: impl AsRef<str>, writer: &mut W) -> Result<(), B
     let huffman_codes = {
         let codes = generate_codes(&content)?;
 
-        match codes {
+        let codes = match codes {
             Some(codes) => codes,
             None => return Ok(()),
-        }
+        };
+
+        codes
+            .into_iter()
+            .map(|(ch, mut bytes)| {
+                let remainder = bytes.len() % 8;
+                let padding = if remainder == 0 { 0 } else { 8 - remainder };
+                bytes.extend(vec![0; padding]);
+                let bit_vec = BitVec::<u8>::from_iter(bytes.into_iter().map(|b| b == 1)).to_bytes();
+                (ch, bit_vec)
+            })
+            .collect()
     };
 
     write_header(writer, &huffman_codes)?;

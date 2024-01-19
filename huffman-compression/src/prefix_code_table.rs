@@ -1,6 +1,5 @@
 use std::{cmp::Ordering, collections::HashMap, error::Error};
 
-use bit_vec::BitVec;
 use itertools::Itertools;
 
 type CodeMap = HashMap<char, Vec<u8>>;
@@ -52,16 +51,6 @@ impl Tree {
         let mut result = HashMap::new();
         let mut code = vec![];
         self.generate_codes_inner(&mut code, &mut result)?;
-        let result = result
-            .into_iter()
-            .map(|(ch, mut bytes)| {
-                let remainder = bytes.len() % 8;
-                let padding = if remainder == 0 { 0 } else { 8 - remainder };
-                bytes.extend(vec![0; padding]);
-                let bit_vec = BitVec::<u8>::from_iter(bytes.into_iter().map(|b| b == 1)).to_bytes();
-                (ch, bit_vec)
-            })
-            .collect();
         Ok(result)
     }
 
