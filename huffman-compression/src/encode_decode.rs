@@ -24,10 +24,7 @@ fn encode<W: Write>(input_file: impl AsRef<str>, writer: &mut W) -> Result<(), B
 
         codes
             .into_iter()
-            .map(|(ch, mut bytes)| {
-                let remainder = bytes.len() % 8;
-                let padding = if remainder == 0 { 0 } else { 8 - remainder };
-                bytes.extend(vec![0; padding]);
+            .map(|(ch, bytes)| {
                 let bit_vec = BitVec::<u8>::from_iter(bytes.into_iter().map(|b| b == 1)).to_bytes();
                 (ch, bit_vec)
             })
