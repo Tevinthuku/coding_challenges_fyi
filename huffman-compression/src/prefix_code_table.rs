@@ -4,10 +4,12 @@ use bit_vec::BitVec;
 use itertools::Itertools;
 
 type CodeMap = HashMap<char, Vec<u8>>;
-pub fn generate_codes(
-    values: impl IntoIterator<Item = (char, usize)>,
-) -> Result<Option<CodeMap>, Box<dyn Error>> {
-    Tree::new(values)
+pub fn generate_codes(content: &str) -> Result<Option<CodeMap>, Box<dyn Error>> {
+    let mapping = content
+        .chars()
+        .into_grouping_map_by(|&x| x)
+        .fold(0, |acc, _key, _value| acc + 1);
+    Tree::new(mapping)
         .map(|tree| tree.generate_codes())
         .transpose()
 }
@@ -206,18 +208,7 @@ enum PopResult {
 #[cfg(test)]
 mod tests {
 
-    use crate::{code_generation::Tree, whitespace::unicode_encoding};
-
-    #[test]
-    fn test_char_mapping() {
-        let content = include_str!("../135-0.txt");
-        let mapping = content
-            .chars()
-            .into_grouping_map_by(|&x| x)
-            .fold(0, |acc, _key, _value| acc + 1);
-        let result = generate_codes(mapping).unwrap().unwrap();
-        println!("{result:?}");
-    }
+    use crate::prefix_code_table::Tree;
 
     #[test]
     fn test_code_generation() {
@@ -236,7 +227,7 @@ mod tests {
 
         let tree = Tree::new(char_mapping).unwrap();
         assert_eq!(tree.weight(), 306);
-        let mut codes = tree.generate_codes().unwrap();
+        let codes = tree.generate_codes().unwrap();
         let expected_codes = [
             ('C', vec![1_u8, 1, 1, 0]),
             ('D', vec![1, 0, 1]),
@@ -252,41 +243,5 @@ mod tests {
             let code = codes.get(&ch).unwrap();
             assert_eq!(code, &expected_code)
         }
-    }
-
-    use bit_vec::BitVec;
-    use itertools::Itertools;
-
-    use super::generate_codes;
-
-    #[test]
-    fn test_bit_stuff() {
-        // Example Huffman codes
-        let huffman_codes: Vec<&str> = vec!["00", "01", "1"];
-
-        // Encode: Translate prefixes into bit strings and pack into bytes
-        let mut packed_bits = BitVec::new();
-        for code in &huffman_codes {
-            packed_bits.extend(code.chars().map(|bit| bit == '1'));
-        }
-
-        // // Padding: Add zeros to complete the last byte
-        let padding_size = (8 - packed_bits.len() % 8) % 8;
-        for _ in 0..padding_size {
-            packed_bits.push(false);
-        }
-
-        // Convert BitVec to bytes
-        let packed_bytes: Vec<u8> = packed_bits.to_bytes();
-
-        // Decode: Read bytes, unpack into bits
-        let unpacked_bits = BitVec::from_bytes(&packed_bytes);
-
-        // Print the results
-        println!("Huffman Codes: {:?}", huffman_codes);
-        println!("Packed Bytes: {:?} {}", packed_bytes, packed_bytes.len());
-        println!("Unpacked Bits: {:?}", unpacked_bits);
-        let unpacked_bytes: Vec<u8> = unpacked_bits.into_iter().map(Into::into).collect_vec();
-        println!("Unpacked Bytes {:?}", unpacked_bytes);
     }
 }
