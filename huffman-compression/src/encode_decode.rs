@@ -92,7 +92,9 @@ fn read_header<R: BufRead>(reader: &mut R) -> std::io::Result<HashMap<char, Vec<
 
     loop {
         let mut line = String::new();
-        reader.read_line(&mut line)?;
+        reader.read_line(&mut line).map_err(|err| {
+            std::io::Error::new(err.kind(), format!("failed to read header line: {}", err))
+        })?;
 
         if line.trim() == HEADER_END_INDICATION {
             break;
@@ -101,24 +103,28 @@ fn read_header<R: BufRead>(reader: &mut R) -> std::io::Result<HashMap<char, Vec<
         header_lines.push(line);
     }
 
-    let huffman_codes = header_lines
-        .iter()
-        .filter_map(|line| {
-            let parts: Vec<&str> = line.trim().split(':').collect();
-            if parts.len() < 2 {
-                return None;
-            }
+    let mut huffman_codes = HashMap::with_capacity(header_lines.len());
+    for (line_number, line) in header_lines.iter().enumerate() {
+        let parts: Vec<&str> = line.trim().split(':').collect();
+        if parts.len() < 2 {
+            continue;
+        }
 
-            let character = unicode_decoding(parts[0])
-                .chars()
-                .next()
-                .unwrap_or_default();
-            let code_as_str = parts[1];
-            let result =
-                serde_json::from_str::<Vec<u8>>(code_as_str).map(|bytes| (character, bytes));
-            Some(result)
-        })
-        .collect::<Result<HashMap<char, Vec<u8>>, _>>()?;
+        let character = unicode_decoding(parts[0])
+            .chars()
+            .next()
+            .unwrap_or_default();
+        let code_as_str = parts.last().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("failed to get the bytes for line_number = {line_number}",),
+            )
+        })?;
+
+        let bytes = serde_json::from_str::<Vec<u8>>(code_as_str)?;
+
+        huffman_codes.insert(character, bytes);
+    }
 
     fn unicode_decoding(input: &str) -> &str {
         match input {

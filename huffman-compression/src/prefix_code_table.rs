@@ -54,7 +54,10 @@ impl Tree {
         self.generate_codes_inner(&mut code, &mut result)?;
         let result = result
             .into_iter()
-            .map(|(ch, bytes)| {
+            .map(|(ch, mut bytes)| {
+                let remainder = bytes.len() % 8;
+                let padding = if remainder == 0 { 0 } else { 8 - remainder };
+                bytes.extend(vec![0; padding]);
                 let bit_vec = BitVec::<u8>::from_iter(bytes.into_iter().map(|b| b == 1)).to_bytes();
                 (ch, bit_vec)
             })
