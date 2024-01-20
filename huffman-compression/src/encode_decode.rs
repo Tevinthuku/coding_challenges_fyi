@@ -5,7 +5,6 @@ use std::{
     io::{BufRead, BufReader, BufWriter, Write},
 };
 
-use bit_vec::BitVec;
 use itertools::Itertools;
 
 use crate::prefix_code_table::generate_codes;
@@ -17,20 +16,11 @@ fn encode<W: Write>(input_file: impl AsRef<str>, writer: &mut W) -> Result<(), B
     let huffman_codes = {
         let codes = generate_codes(&content)?;
 
-        let codes = match codes {
+        match codes {
             Some(codes) => codes,
             None => return Ok(()),
-        };
-
-        codes
-            .into_iter()
-            .map(|(ch, bytes)| {
-                let bit_vec = BitVec::<u8>::from_iter(bytes.into_iter().map(|b| b == 1)).to_bytes();
-                (ch, bit_vec)
-            })
-            .collect()
+        }
     };
-
     write_header(writer, &huffman_codes)?;
 
     let encoded_content = content
@@ -76,20 +66,25 @@ fn write_header<W: Write>(
 
 fn huffman_decode<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> std::io::Result<()> {
     let huffman_codes = read_header(reader)?;
-    let mut byte_buffer = Vec::new();
+
+    let huffman_codes = huffman_codes
+        .into_iter()
+        .map(|(ch, codes)| (codes, ch))
+        .collect::<HashMap<_, _>>();
+
+    let mut bit_buffer = Vec::new();
 
     loop {
-        let mut buffer = [0; 1];
+        let mut buffer = [0; 8];
         if reader.read_exact(&mut buffer).is_err() {
             break; // End of file
         }
 
-        byte_buffer.extend(buffer);
-
-        for (ch, code_bytes) in huffman_codes.iter() {
-            if code_bytes == &byte_buffer {
+        for bit in buffer {
+            bit_buffer.push(bit);
+            if let Some(ch) = huffman_codes.get(&bit_buffer) {
                 write!(writer, "{}", ch)?;
-                byte_buffer.clear();
+                bit_buffer.clear();
             }
         }
     }
@@ -114,7 +109,22 @@ fn read_header<R: BufRead>(reader: &mut R) -> std::io::Result<HashMap<char, Vec<
 
     let mut huffman_codes = HashMap::with_capacity(header_lines.len());
     for (line_number, line) in header_lines.iter().enumerate() {
-        let parts: Vec<&str> = line.trim().split(':').collect();
+        let parts: Vec<&str> = if line.contains("::") {
+            // since we are splitting by ":", the colon character will be treated as the separator;
+            // this is why we handle it separately in this if block
+            let split: Vec<&str> = line.trim().split("::").collect();
+            let codes = split.last().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("failed to get the bytes for line_number = {line_number}",),
+                )
+            })?;
+
+            vec![":", codes]
+        } else {
+            line.trim().split(':').collect()
+        };
+        println!("parts {parts:?}");
         if parts.len() < 2 {
             continue;
         }
@@ -123,12 +133,7 @@ fn read_header<R: BufRead>(reader: &mut R) -> std::io::Result<HashMap<char, Vec<
             .chars()
             .next()
             .unwrap_or_default();
-        let code_as_str = parts.last().ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("failed to get the bytes for line_number = {line_number}",),
-            )
-        })?;
+        let code_as_str = parts[1];
 
         let bytes = serde_json::from_str::<Vec<u8>>(code_as_str)?;
 
@@ -185,6 +190,6 @@ mod tests {
         let input_content = include_str!("../tests/lorem.txt");
         let output_content = include_str!("../tests/lorem-output.txt");
 
-        assert_eq!(input_content, output_content)
+        assert_eq!(input_content, output_content);
     }
 }
