@@ -124,7 +124,6 @@ fn read_header<R: BufRead>(reader: &mut R) -> std::io::Result<HashMap<char, Vec<
         } else {
             line.trim().split(':').collect()
         };
-        println!("parts {parts:?}");
         if parts.len() < 2 {
             continue;
         }
