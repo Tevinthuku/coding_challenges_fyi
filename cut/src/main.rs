@@ -5,52 +5,23 @@ use std::{
     io::{self, BufRead, BufReader, Write},
 };
 
-const SKIP_CHALLENGE_PATH: usize = 1;
 fn main() -> Result<(), Box<dyn Error>> {
-    let mut args = env::args().skip(SKIP_CHALLENGE_PATH);
-    let command = args.next().ok_or("Failed to get the command")?;
-    const FILE_COMMAND: &str = "-f";
-    if !command.starts_with(FILE_COMMAND) {
-        return Err("Invalid command".into());
-    }
-    let fields_needed = {
-        let fields_needed = command.replace(FILE_COMMAND, "");
-        if fields_needed.contains(',') {
-            fields_needed
-                .split(',')
-                .map(|field| field.parse::<usize>())
-                .collect::<Result<Vec<_>, _>>()?
-        } else if fields_needed.contains(' ') {
-            fields_needed
-                .split(' ')
-                .map(|field| field.parse::<usize>())
-                .collect::<Result<Vec<_>, _>>()?
-        } else {
-            vec![fields_needed.parse::<usize>()?]
+    let Arguments {
+        file_name,
+        delimeter,
+        fields_needed,
+    } = Arguments::new()?;
+    let reader: Box<dyn BufRead> = match file_name {
+        Some(file_name) => {
+            let f = File::open(file_name)?;
+            Box::new(BufReader::new(f))
+        }
+        None => {
+            let stdin = std::io::stdin();
+            let reader = stdin.lock();
+            Box::new(reader)
         }
     };
-    const DELIMETER_COMMAND: &str = "-d";
-    let maybe_file_name_or_delimeter = args.next().ok_or("Failed to get the next argument")?;
-    if maybe_file_name_or_delimeter.starts_with(DELIMETER_COMMAND) {
-        let delimeter = maybe_file_name_or_delimeter.replace(DELIMETER_COMMAND, "");
-        let file_name = args.next().ok_or("Failed to get the file name")?;
-        return process_command_f2(&file_name, &delimeter, fields_needed);
-    }
-    let default_tab_delimeter = "\t";
-    process_command_f2(
-        &maybe_file_name_or_delimeter,
-        default_tab_delimeter,
-        fields_needed,
-    )
-}
-
-fn process_command_f2(
-    file_name: &str,
-    delimeter: &str,
-    fields_needed: Vec<usize>,
-) -> Result<(), Box<dyn Error>> {
-    let f = File::open(file_name)?;
-    let reader = BufReader::new(f);
     let mut stdout = io::stdout().lock();
 
     let mut write_to_output = |content: &[u8]| -> Result<(), Box<dyn Error>> {
@@ -68,9 +39,10 @@ fn process_command_f2(
     for line in lines {
         let line = line?;
         for field_needed in &fields_needed {
-            // we are subtracting 1 because the command is 1 based and the field is 0 based
-            let field_needed = field_needed - 1;
-            let word_needed = line.split(delimeter).nth(field_needed).unwrap_or_default();
+            let word_needed = line
+                .split(&delimeter)
+                .nth(*field_needed)
+                .unwrap_or_default();
             let word_needed = format!("{word_needed}{delimeter}");
             write_to_output(word_needed.as_bytes())?;
         }
@@ -78,4 +50,59 @@ fn process_command_f2(
     }
 
     Ok(())
+}
+
+struct Arguments {
+    file_name: Option<String>,
+    delimeter: String,
+    fields_needed: Vec<usize>,
+}
+
+impl Arguments {
+    fn new() -> Result<Self, Box<dyn Error>> {
+        let mut fields_needed = vec![];
+        let mut delimeter = None;
+        let mut file_name = None;
+        const SKIP_CHALLENGE_PATH: usize = 1;
+        let args = env::args().skip(SKIP_CHALLENGE_PATH);
+        const FIELD_COMMAND: &str = "-f";
+        const DELIMETER_COMMAND: &str = "-d";
+        for arg in args {
+            if arg.starts_with(FIELD_COMMAND) {
+                fields_needed = Self::get_fields_needed(&arg)?;
+            } else if arg.starts_with(DELIMETER_COMMAND) {
+                delimeter = Some(arg.replace(DELIMETER_COMMAND, ""));
+            } else if !arg.trim().is_empty() {
+                file_name = Some(arg);
+            }
+        }
+        if fields_needed.is_empty() {
+            return Err("No fields were provided".into());
+        }
+        let delimeter = delimeter.unwrap_or_else(|| "\t".to_string());
+        Ok(Self {
+            file_name,
+            delimeter,
+            fields_needed,
+        })
+    }
+
+    fn get_fields_needed(fields_needed: &str) -> Result<Vec<usize>, Box<dyn Error>> {
+        let results = if fields_needed.contains(',') {
+            fields_needed
+                .split(',')
+                .map(|field| field.parse::<usize>())
+                .collect::<Result<Vec<_>, _>>()?
+        } else if fields_needed.contains(' ') {
+            fields_needed
+                .split(' ')
+                .map(|field| field.parse::<usize>())
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            vec![fields_needed.parse::<usize>()?]
+        };
+
+        // we are subtracting 1 because the command is 1 based and the field is 0 based
+        Ok(results.into_iter().map(|field| field - 1).collect())
+    }
 }
