@@ -35,8 +35,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Ok(())
     };
 
-    let lines = reader.lines();
-    for line in lines {
+    for line in reader.lines() {
         let line = line?;
         for field_needed in &fields_needed {
             let word_needed = line
