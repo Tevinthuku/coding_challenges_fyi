@@ -69,6 +69,7 @@ impl Arguments {
         const DELIMETER_COMMAND: &str = "-d";
         for arg in args {
             if arg.starts_with(FIELD_COMMAND) {
+                let arg = arg.replace(FIELD_COMMAND, "");
                 fields_needed = Self::get_fields_needed(&arg)?;
             } else if arg.starts_with(DELIMETER_COMMAND) {
                 delimeter = Some(arg.replace(DELIMETER_COMMAND, ""));
