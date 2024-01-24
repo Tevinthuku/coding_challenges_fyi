@@ -14,7 +14,7 @@ const HEADER_END_INDICATION: &str = "HEADER_END";
 fn encode<W: Write>(input_file: impl AsRef<str>, writer: &mut W) -> Result<(), Box<dyn Error>> {
     let content = fs::read_to_string(input_file.as_ref())?;
     let huffman_codes = {
-        let codes = generate_codes(&content)?;
+        let codes = generate_codes(&content);
 
         match codes {
             Some(codes) => codes,

@@ -1,16 +1,14 @@
-use std::{cmp::Ordering, collections::HashMap, error::Error};
+use std::{cmp::Ordering, collections::HashMap};
 
 use itertools::Itertools;
 
 type CodeMap = HashMap<char, Vec<u8>>;
-pub fn generate_codes(content: &str) -> Result<Option<CodeMap>, Box<dyn Error>> {
+pub fn generate_codes(content: &str) -> Option<CodeMap> {
     let mapping = content
         .chars()
         .into_grouping_map_by(|&x| x)
         .fold(0, |acc, _key, _value| acc + 1);
-    Tree::new(mapping)
-        .map(|tree| tree.generate_codes())
-        .transpose()
+    Tree::new(mapping).map(|tree| tree.generate_codes())
 }
 
 #[derive(Debug, Clone)]
@@ -25,6 +23,11 @@ impl From<(char, usize)> for Tree {
 }
 
 impl Tree {
+    pub fn new(values: impl IntoIterator<Item = (char, usize)>) -> Option<Self> {
+        let trees = Trees::from_iter(values.into_iter().map_into());
+        trees.merge()
+    }
+
     fn char(&self) -> char {
         self.0
             .as_ref()
@@ -35,11 +38,6 @@ impl Tree {
             .unwrap_or_default()
     }
 
-    pub fn new(values: impl IntoIterator<Item = (char, usize)>) -> Option<Self> {
-        let trees = Trees::from_iter(values.into_iter().map_into());
-        trees.merge()
-    }
-
     fn weight(&self) -> usize {
         self.0
             .as_ref()
@@ -47,35 +45,83 @@ impl Tree {
             .unwrap_or(usize::MIN)
     }
 
-    fn generate_codes(self) -> Result<HashMap<char, Vec<u8>>, Box<dyn Error>> {
+    fn generate_codes(self) -> HashMap<char, Vec<u8>> {
         let mut result = HashMap::new();
         let mut code = vec![];
-        self.generate_codes_inner(&mut code, &mut result)?;
-        Ok(result)
+        self.generate_codes_inner(&mut code, &mut result);
+        result
     }
 
-    fn generate_codes_inner(
-        self,
-        current_code: &mut Vec<u8>,
-        result: &mut HashMap<char, Vec<u8>>,
-    ) -> Result<(), Box<dyn Error>> {
+    fn generate_codes_inner(self, current_code: &mut Vec<u8>, result: &mut HashMap<char, Vec<u8>>) {
         if let Some(current) = self.0 {
             let left = current.left;
             current_code.push(0);
-            left.generate_codes_inner(current_code, result)?;
+            left.generate_codes_inner(current_code, result);
             current_code.pop();
             if let Value::Leaf { ch, count: _ } = current.value {
                 result.insert(ch, current_code.to_owned());
             };
             let right = current.right;
             current_code.push(1);
-            right.generate_codes_inner(current_code, result)?;
+            right.generate_codes_inner(current_code, result);
             current_code.pop();
-            Ok(())
-        } else {
-            Ok(())
         }
     }
+}
+
+struct Trees(Vec<Tree>);
+
+impl FromIterator<Tree> for Trees {
+    fn from_iter<T: IntoIterator<Item = Tree>>(iter: T) -> Self {
+        let sorted_trees = iter.into_iter().sorted_by(cmp_tree_desc).collect_vec();
+        Self(sorted_trees)
+    }
+}
+
+impl Trees {
+    fn merge(mut self) -> Option<Tree> {
+        loop {
+            let result = self.pop_lowest()?;
+            match result {
+                PopResult::TreesToMerge { left, right } => {
+                    let new_tree_weight = left.weight() + right.weight();
+
+                    let root_node = Node {
+                        value: Value::WeightSum(new_tree_weight),
+                        right,
+                        left,
+                    };
+                    let tree = Tree(Some(Box::new(root_node)));
+
+                    self.insert(tree);
+                }
+                PopResult::Single(tree) => {
+                    return Some(tree);
+                }
+            }
+        }
+    }
+
+    pub fn pop_lowest(&mut self) -> Option<PopResult> {
+        let left = self.0.pop()?;
+
+        let item_result = match self.0.pop() {
+            Some(right) => PopResult::TreesToMerge { left, right },
+            None => PopResult::Single(left),
+        };
+
+        Some(item_result)
+    }
+
+    fn insert(&mut self, tree: Tree) {
+        self.0.push(tree);
+        self.0.sort_unstable_by(cmp_tree_desc);
+    }
+}
+
+enum PopResult {
+    TreesToMerge { left: Tree, right: Tree },
+    Single(Tree),
 }
 
 #[derive(Debug, Clone)]
@@ -142,61 +188,6 @@ impl PartialEq for Value {
     }
 }
 
-struct Trees(Vec<Tree>);
-
-impl FromIterator<Tree> for Trees {
-    fn from_iter<T: IntoIterator<Item = Tree>>(iter: T) -> Self {
-        let sorted_trees = iter.into_iter().sorted_by(cmp_tree_desc).collect_vec();
-        Self(sorted_trees)
-    }
-}
-
-impl Trees {
-    fn merge(mut self) -> Option<Tree> {
-        loop {
-            let result = self.pop_lowest()?;
-            match result {
-                PopResult::TreesToMerge { left, right } => {
-                    let new_tree_weight = left.weight() + right.weight();
-
-                    let root_node = Node {
-                        value: Value::WeightSum(new_tree_weight),
-                        right,
-                        left,
-                    };
-                    let tree = Tree(Some(Box::new(root_node)));
-
-                    self.insert(tree);
-                }
-                PopResult::Single(tree) => {
-                    return Some(tree);
-                }
-            }
-        }
-    }
-
-    pub fn pop_lowest(&mut self) -> Option<PopResult> {
-        let left = self.0.pop()?;
-
-        let item_result = match self.0.pop() {
-            Some(right) => PopResult::TreesToMerge { left, right },
-            None => PopResult::Single(left),
-        };
-
-        Some(item_result)
-    }
-
-    fn insert(&mut self, tree: Tree) {
-        self.0.push(tree);
-        self.0.sort_unstable_by(cmp_tree_desc);
-    }
-}
-
-enum PopResult {
-    TreesToMerge { left: Tree, right: Tree },
-    Single(Tree),
-}
-
 #[cfg(test)]
 mod tests {
 
@@ -219,7 +210,7 @@ mod tests {
 
         let tree = Tree::new(char_mapping).unwrap();
         assert_eq!(tree.weight(), 306);
-        let codes = tree.generate_codes().unwrap();
+        let codes = tree.generate_codes();
         let expected_codes = [
             ('C', vec![1_u8, 1, 1, 0]),
             ('D', vec![1, 0, 1]),
