@@ -29,7 +29,10 @@ fn encode<W: Write>(input_file: impl AsRef<str>, writer: &mut W) -> Result<(), B
         .copied()
         .collect_vec();
 
-    writer.write_all(&encoded_content)?;
+    let mut bit_writer = bitstream::BitWriter::new(writer);
+    for bit in encoded_content {
+        bit_writer.write_bit(bit == 1)?;
+    }
 
     Ok(())
 }
@@ -64,8 +67,8 @@ fn write_header<W: Write>(
     Ok(())
 }
 
-fn huffman_decode<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> std::io::Result<()> {
-    let huffman_codes = read_header(reader)?;
+fn huffman_decode<R: BufRead, W: Write>(mut reader: R, writer: &mut W) -> std::io::Result<()> {
+    let huffman_codes = read_header(&mut reader)?;
 
     let huffman_codes = huffman_codes
         .into_iter()
@@ -74,18 +77,17 @@ fn huffman_decode<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> std::
 
     let mut bit_buffer = Vec::new();
 
+    let mut bit_reader = bitstream::BitReader::new(reader);
     loop {
-        let mut buffer = [0; 8];
-        if reader.read_exact(&mut buffer).is_err() {
-            break; // End of file
-        }
-
-        for bit in buffer {
-            bit_buffer.push(bit);
+        let bit = bit_reader.read_bit()?;
+        if let Some(bit) = bit {
+            bit_buffer.push(bit.into());
             if let Some(ch) = huffman_codes.get(&bit_buffer) {
                 write!(writer, "{}", ch)?;
                 bit_buffer.clear();
             }
+        } else {
+            break;
         }
     }
     Ok(())

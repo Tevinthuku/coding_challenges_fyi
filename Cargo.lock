@@ -18,10 +18,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
-name = "bit-vec"
-version = "0.6.3"
+name = "bitstream-rs"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "349f9b6a179ed607305526ca489b34ad0a41aed5f7980fa90eb03160b69598fb"
+checksum = "eb547f8b290a2aa489a93ef0f4030080cdf122ba1790ac530384eef3b8ac3cc8"
 
 [[package]]
 name = "ccwc"
@@ -148,7 +148,7 @@ checksum = "d2fabcfbdc87f4758337ca535fb41a6d701b65693ce38287d856d1674551ec9b"
 name = "huffman-compression"
 version = "0.1.0"
 dependencies = [
- "bit-vec",
+ "bitstream-rs",
  "itertools",
  "serde_json",
 ]
