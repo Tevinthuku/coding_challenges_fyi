@@ -6,7 +6,7 @@ async fn index() -> impl Responder {
     "Hello world!"
 }
 
-async fn post_index(info: web::Json<serde_json::Value>) -> impl Responder {
+async fn just_test_post(info: web::Json<serde_json::Value>) -> impl Responder {
     format!("response: {:?}", info.into_inner())
 }
 
@@ -18,8 +18,8 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .wrap(Logger::default())
             .wrap(setup_cors())
-            .route("/hey", web::get().to(index))
-            .route("/hey", web::post().to(post_index))
+            .route("/", web::get().to(index))
+            .route("/hey", web::post().to(just_test_post))
     })
     .bind("127.0.0.1:8081")?
     .run()

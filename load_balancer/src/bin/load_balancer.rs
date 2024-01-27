@@ -1,19 +1,19 @@
+use actix_web::middleware::Logger;
 use actix_web::{
     error, http::header::ContentType, http::StatusCode, web, App, HttpRequest, HttpResponse,
     HttpServer,
 };
-use actix_web::{get, middleware::Logger};
 
 use derive_more::{Display, Error};
 use env_logger::Env;
 use load_balancer::setup_cors;
 use log::info;
 use reqwest::Client;
-use serde_json::Value;
 
 #[derive(Debug, Display, Error)]
 enum LoadBalancerError {
     InternalError(#[error(source)] reqwest::Error),
+    PayloadError(#[error(source)] actix_web::error::Error),
 }
 
 impl error::ResponseError for LoadBalancerError {
@@ -24,9 +24,7 @@ impl error::ResponseError for LoadBalancerError {
     }
 
     fn status_code(&self) -> StatusCode {
-        match *self {
-            LoadBalancerError::InternalError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-        }
+        StatusCode::INTERNAL_SERVER_ERROR
     }
 }
 
@@ -38,14 +36,12 @@ async fn handler(req: HttpRequest, body: web::Payload) -> Result<HttpResponse, L
 
     let request_builder = client.request(req.method().clone(), full_url);
     let request_builder = request_builder.headers(req.headers().clone().into());
-    // todo: fix this unwrap
-    let bytes = body.to_bytes().await.unwrap();
+    let bytes = body
+        .to_bytes()
+        .await
+        .map_err(LoadBalancerError::PayloadError)?;
+
     let request_builder = request_builder.body(bytes);
-    // let request_builder = if let Some(data) = maybe_data.into_inner() {
-    //     request_builder.json(&data)
-    // } else {
-    //     request_builder
-    // };
     let response = request_builder
         .send()
         .await
