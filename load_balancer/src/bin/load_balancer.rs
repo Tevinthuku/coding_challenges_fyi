@@ -13,7 +13,6 @@ use reqwest::Client;
 #[derive(Debug, Display, Error)]
 enum LoadBalancerError {
     InternalError(#[error(source)] reqwest::Error),
-    PayloadError(#[error(source)] actix_web::error::Error),
 }
 
 impl error::ResponseError for LoadBalancerError {
@@ -28,20 +27,16 @@ impl error::ResponseError for LoadBalancerError {
     }
 }
 
-async fn handler(req: HttpRequest, body: web::Payload) -> Result<HttpResponse, LoadBalancerError> {
+async fn handler(req: HttpRequest, payload: web::Bytes) -> Result<HttpResponse, LoadBalancerError> {
     let main_backend_server = "http://localhost:8081";
     let full_url = format!("{}{}", main_backend_server, req.uri());
     info!("full_url: {}", full_url);
 
     let client = Client::new();
-    let request_builder = client.request(req.method().clone(), full_url);
-    let request_builder = request_builder.headers(req.headers().clone().into());
-
-    let bytes = body
-        .to_bytes()
-        .await
-        .map_err(LoadBalancerError::PayloadError)?;
-    let request_builder = request_builder.body(bytes);
+    let request_builder = client
+        .request(req.method().clone(), full_url)
+        .headers(req.headers().clone().into())
+        .body(payload);
 
     let response = request_builder
         .send()
