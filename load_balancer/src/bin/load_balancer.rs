@@ -32,16 +32,17 @@ async fn handler(req: HttpRequest, body: web::Payload) -> Result<HttpResponse, L
     let main_backend_server = "http://localhost:8081";
     let full_url = format!("{}{}", main_backend_server, req.uri());
     info!("full_url: {}", full_url);
-    let client = Client::new();
 
+    let client = Client::new();
     let request_builder = client.request(req.method().clone(), full_url);
     let request_builder = request_builder.headers(req.headers().clone().into());
+
     let bytes = body
         .to_bytes()
         .await
         .map_err(LoadBalancerError::PayloadError)?;
-
     let request_builder = request_builder.body(bytes);
+
     let response = request_builder
         .send()
         .await
@@ -55,12 +56,12 @@ async fn handler(req: HttpRequest, body: web::Payload) -> Result<HttpResponse, L
         .fold(&mut response_builder, |response_builder, header| {
             response_builder.append_header(header)
         });
+
     let body = response
         .text()
         .await
         .map_err(LoadBalancerError::InternalError)?;
-    let response = response_builder.body(body);
-    Ok(response)
+    Ok(response_builder.body(body))
 }
 
 #[actix_web::main]
