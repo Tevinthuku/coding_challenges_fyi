@@ -30,7 +30,7 @@ impl error::ResponseError for LoadBalancerError {
     }
 }
 
-async fn proxy_handler(req: HttpRequest) -> Result<HttpResponse, LoadBalancerError> {
+async fn handler(req: HttpRequest, body: web::Payload) -> Result<HttpResponse, LoadBalancerError> {
     let main_backend_server = "http://localhost:8081";
     let full_url = format!("{}{}", main_backend_server, req.uri());
     info!("full_url: {}", full_url);
@@ -38,6 +38,9 @@ async fn proxy_handler(req: HttpRequest) -> Result<HttpResponse, LoadBalancerErr
 
     let request_builder = client.request(req.method().clone(), full_url);
     let request_builder = request_builder.headers(req.headers().clone().into());
+    // todo: fix this unwrap
+    let bytes = body.to_bytes().await.unwrap();
+    let request_builder = request_builder.body(bytes);
     // let request_builder = if let Some(data) = maybe_data.into_inner() {
     //     request_builder.json(&data)
     // } else {
@@ -72,7 +75,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .wrap(setup_cors())
             .wrap(Logger::default())
-            .service(web::resource("/{tail:.*}").route(web::get().to(proxy_handler)))
+            .service(web::resource("/{tail:.*}").to(handler))
     })
     .bind("127.0.0.1:8080")?
     .run()
