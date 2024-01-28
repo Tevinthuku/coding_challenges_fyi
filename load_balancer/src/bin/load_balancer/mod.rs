@@ -37,10 +37,10 @@ async fn handler(
     payload: web::Bytes,
     distributor: web::Data<Distributor>,
 ) -> Result<HttpResponse, LoadBalancerError> {
-    let backend = distributor
-        .get_backend()
+    let server = distributor
+        .get_server()
         .map_err(LoadBalancerError::RequestDistributionError)?;
-    let full_url = format!("{}{}", backend, req.uri());
+    let full_url = format!("{}{}", server, req.uri());
     trace!("full_url: {}", full_url);
 
     let client = Client::new();
