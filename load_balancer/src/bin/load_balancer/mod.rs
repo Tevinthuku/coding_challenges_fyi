@@ -1,23 +1,23 @@
 mod request_distributor;
 
-use std::sync::{MutexGuard, PoisonError};
-
 use actix_web::middleware::Logger;
 use actix_web::{
     error, http::header::ContentType, http::StatusCode, web, App, HttpRequest, HttpResponse,
     HttpServer,
 };
+use log::{error, trace};
+use request_distributor::{Distributor, DistributorError};
+use std::io;
 
 use derive_more::{Display, Error};
 use env_logger::Env;
 use load_balancer::setup_cors;
-use log::info;
 use reqwest::Client;
 
 #[derive(Debug, Display, Error)]
 enum LoadBalancerError {
     InternalError(#[error(source)] reqwest::Error),
-    RequestDistributionError(#[error(source)] PoisonError<MutexGuard<'static, usize>>),
+    RequestDistributionError(#[error(source)] DistributorError),
 }
 
 impl error::ResponseError for LoadBalancerError {
@@ -32,10 +32,16 @@ impl error::ResponseError for LoadBalancerError {
     }
 }
 
-async fn handler(req: HttpRequest, payload: web::Bytes) -> Result<HttpResponse, LoadBalancerError> {
-    let main_backend_server = "http://localhost:8081";
-    let full_url = format!("{}{}", main_backend_server, req.uri());
-    info!("full_url: {}", full_url);
+async fn handler(
+    req: HttpRequest,
+    payload: web::Bytes,
+    distributor: web::Data<Distributor>,
+) -> Result<HttpResponse, LoadBalancerError> {
+    let backend = distributor
+        .get_backend()
+        .map_err(LoadBalancerError::RequestDistributionError)?;
+    let full_url = format!("{}{}", backend, req.uri());
+    trace!("full_url: {}", full_url);
 
     let client = Client::new();
     let request_builder = client
@@ -67,9 +73,17 @@ async fn handler(req: HttpRequest, payload: web::Bytes) -> Result<HttpResponse, 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     env_logger::init_from_env(Env::default().default_filter_or("info"));
+    let request_distributor = request_distributor::Distributor::new().map_err(|err| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!("Failed to load backends: {:?}", err),
+        )
+    })?;
+    let request_distributor = web::Data::new(request_distributor);
 
-    HttpServer::new(|| {
+    HttpServer::new(move || {
         App::new()
+            .app_data(request_distributor.clone())
             .wrap(setup_cors())
             .wrap(Logger::default())
             .service(web::resource("/{tail:.*}").to(handler))

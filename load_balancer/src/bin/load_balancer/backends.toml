@@ -1,5 +1,5 @@
 [[backend]]
-  url = "localhost:8080"
+  url = "http://localhost:8080"
 
 [[backend]]
-  url = "localhost:8081"
+  url = "http://localhost:8081"
