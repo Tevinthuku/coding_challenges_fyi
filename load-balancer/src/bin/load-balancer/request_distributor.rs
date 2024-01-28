@@ -45,7 +45,7 @@ impl Distributor {
             let base_path = std::env::current_dir().map_err(|err| {
                 DistributorError::ConfigError(ConfigError::NotFound(err.to_string()))
             })?;
-            base_path.join("src/bin/load_balancer/servers.toml")
+            base_path.join("src/bin/load-balancer/servers.toml")
         };
 
         let settings = Config::builder()
@@ -136,6 +136,8 @@ impl Server {
         tokio::spawn(async move {
             let mut ticker = interval(Duration::from_secs(duration));
             loop {
+                ticker.tick().await;
+
                 let response = reqwest::get(&url)
                     .await
                     .and_then(|response| response.error_for_status());
@@ -149,7 +151,6 @@ impl Server {
                 {
                     error!("Error sending health status: {:?}", err);
                 }
-                ticker.tick().await;
             }
         });
     }

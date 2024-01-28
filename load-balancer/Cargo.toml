@@ -1,13 +1,13 @@
 [package]
-name = "load_balancer"
+name = "load-balancer"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [[bin]]
-name = "load_balancer"
-path = "src/bin/load_balancer/mod.rs"
+name = "load-balancer"
+path = "src/bin/load-balancer/mod.rs"
 
 [dependencies]
 actix-web = "4"
