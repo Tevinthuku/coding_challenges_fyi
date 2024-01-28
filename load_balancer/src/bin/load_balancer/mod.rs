@@ -1,3 +1,7 @@
+mod request_distributor;
+
+use std::sync::{MutexGuard, PoisonError};
+
 use actix_web::middleware::Logger;
 use actix_web::{
     error, http::header::ContentType, http::StatusCode, web, App, HttpRequest, HttpResponse,
@@ -13,6 +17,7 @@ use reqwest::Client;
 #[derive(Debug, Display, Error)]
 enum LoadBalancerError {
     InternalError(#[error(source)] reqwest::Error),
+    RequestDistributionError(#[error(source)] PoisonError<MutexGuard<'static, usize>>),
 }
 
 impl error::ResponseError for LoadBalancerError {
@@ -69,7 +74,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(Logger::default())
             .service(web::resource("/{tail:.*}").to(handler))
     })
-    .bind("127.0.0.1:8080")?
+    .bind("127.0.0.1:8090")?
     .run()
     .await
 }
