@@ -5,10 +5,10 @@ use actix_web::{
     error, http::header::ContentType, http::StatusCode, web, App, HttpRequest, HttpResponse,
     HttpServer,
 };
-use log::{error, info, trace, warn};
+use log::{error, info, warn};
 use request_distributor::{Distributor, DistributorError};
-use std::io;
-use tokio::sync::oneshot;
+use std::{io, time::Duration};
+use tokio::{sync::oneshot, time::Instant};
 
 use derive_more::{Display, Error};
 use env_logger::Env;
@@ -43,18 +43,26 @@ async fn handler(
         .map_err(LoadBalancerError::RequestDistributionError)?;
 
     let full_url = format!("{}{}", server, req.uri());
-    trace!("full_url: {}", full_url);
 
     let client = Client::new();
     let request_builder = client
-        .request(req.method().clone(), full_url)
+        .request(req.method().clone(), &full_url)
         .headers(req.headers().clone().into())
         .body(payload);
 
+    let start_time = Instant::now();
     let response = request_builder
         .send()
         .await
         .map_err(LoadBalancerError::InternalError)?;
+
+    let elapsed = start_time.elapsed();
+    info!(
+        "Request to {} took {}.{:03} seconds",
+        full_url,
+        elapsed.as_secs(),
+        elapsed.subsec_millis()
+    );
 
     let mut response_builder = HttpResponse::build(response.status());
 
@@ -96,6 +104,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(Logger::default())
             .service(web::resource("/{tail:.*}").to(handler))
     })
+    .keep_alive(Duration::from_secs(75))
     .bind("127.0.0.1:8090")?
     .run();
 
