@@ -5,9 +5,10 @@ use actix_web::{
     error, http::header::ContentType, http::StatusCode, web, App, HttpRequest, HttpResponse,
     HttpServer,
 };
-use log::{error, trace};
+use log::{error, info, trace, warn};
 use request_distributor::{Distributor, DistributorError};
 use std::io;
+use tokio::sync::oneshot;
 
 use derive_more::{Display, Error};
 use env_logger::Env;
@@ -73,15 +74,20 @@ async fn handler(
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     env_logger::init_from_env(Env::default().default_filter_or("info"));
-    let request_distributor = request_distributor::Distributor::new().map_err(|err| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            format!("Failed to load backends: {:?}", err),
-        )
-    })?;
+
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+
+    let request_distributor =
+        request_distributor::Distributor::new(shutdown_tx).map_err(|err| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("Failed to load backends: {:?}", err),
+            )
+        })?;
+
     let request_distributor = web::Data::new(request_distributor);
 
-    HttpServer::new(move || {
+    let server = HttpServer::new(move || {
         App::new()
             .app_data(request_distributor.clone())
             .wrap(setup_cors())
@@ -89,6 +95,19 @@ async fn main() -> std::io::Result<()> {
             .service(web::resource("/{tail:.*}").to(handler))
     })
     .bind("127.0.0.1:8090")?
-    .run()
-    .await
+    .run();
+
+    let handle = server.handle();
+
+    tokio::task::spawn(async move {
+        match shutdown_rx.await {
+            Ok(_) => {
+                info!("Received shutdown signal");
+                handle.stop(true).await
+            }
+            Err(err) => warn!("Failed to receive shutdown: {err:?}"),
+        }
+    });
+
+    server.await
 }

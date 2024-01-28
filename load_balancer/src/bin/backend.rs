@@ -1,4 +1,4 @@
-use actix_web::{middleware::Logger, web, App, HttpServer, Responder};
+use actix_web::{middleware::Logger, web, App, HttpResponse, HttpServer, Responder};
 use env_logger::Env;
 use load_balancer::setup_cors;
 
@@ -25,6 +25,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(setup_cors())
             .app_data(web::Data::new(port))
             .route("/", web::get().to(index))
+            .route("/healthz", web::get().to(HttpResponse::Ok))
     })
     .bind(("127.0.0.1", port))?
     .run()
