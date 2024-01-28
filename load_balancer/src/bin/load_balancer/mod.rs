@@ -41,6 +41,7 @@ async fn handler(
     let server = distributor
         .get_server()
         .map_err(LoadBalancerError::RequestDistributionError)?;
+
     let full_url = format!("{}{}", server, req.uri());
     trace!("full_url: {}", full_url);
 
@@ -75,6 +76,7 @@ async fn handler(
 async fn main() -> std::io::Result<()> {
     env_logger::init_from_env(Env::default().default_filter_or("info"));
 
+    // We want to shutdown the load balancer if and when we get a poison error from the request distributor.
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
     let request_distributor =

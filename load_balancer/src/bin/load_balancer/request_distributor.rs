@@ -1,3 +1,10 @@
+/// This module is responsible for distributing the requests to the servers
+/// It will monitor the health of the servers and will only distribute the requests to the healthy servers
+///
+/// The health of the servers is monitored by sending a GET request to the health endpoint of the server
+/// The health endpoint is configured in the servers.toml file
+/// The health check interval is configured via the HEALTH_CHECK_INTERVAL environment variable
+/// The default value is 1 second
 use derive_more::{Display, Error};
 use std::{
     collections::VecDeque,
@@ -101,7 +108,8 @@ impl Distributor {
             .active_servers
             .lock()
             .map_err(|err| DistributorError::PoisonError(err.to_string()))?;
-
+        // we are removing the first server from the queue and pushing it to the back
+        // this way we won't have to maintain a separate index / pointer
         let server = servers.pop_front();
         if let Some(ref server) = server {
             servers.push_back(server.clone());
@@ -117,8 +125,16 @@ impl Server {
         let url = self.url.clone();
         let url = format!("{}{}", url, self.health_endpoint);
         let server = self.clone();
+
+        let duration = std::env::var("HEALTH_CHECK_INTERVAL")
+            .map(|port| {
+                port.parse()
+                    .expect("HEALTH_CHECK_INTERVAL must be a number")
+            })
+            .unwrap_or(1);
+
         tokio::spawn(async move {
-            let mut ticker = interval(Duration::from_secs(1));
+            let mut ticker = interval(Duration::from_secs(duration));
             loop {
                 let response = reqwest::get(&url)
                     .await
