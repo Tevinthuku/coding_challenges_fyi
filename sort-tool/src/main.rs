@@ -10,12 +10,6 @@ use itertools::Itertools;
 const SKIP_CHALLENGE_PATH: usize = 1;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let mut args = env::args().skip(SKIP_CHALLENGE_PATH);
-    let file_name = args.next().ok_or("Failed to get file_name")?;
-    let reader = BufReader::new(File::open(file_name)?);
-
-    let sorted_content = reader.lines().flatten().sorted();
-
     let mut stdout = io::stdout().lock();
 
     let mut write_to_output = |content: &[u8]| -> Result<(), Box<dyn Error>> {
@@ -29,9 +23,43 @@ fn main() -> Result<(), Box<dyn Error>> {
         Ok(())
     };
 
+    let args = Arguments::new()?;
+    let reader = BufReader::new(File::open(args.file_name)?);
+
+    let lines = reader.lines().flatten();
+
+    let sorted_content = if args.unique {
+        lines.unique().sorted()
+    } else {
+        lines.sorted()
+    };
+
     for content in sorted_content {
         write_to_output(format!("{}\n", content).as_bytes())?;
     }
 
     Ok(())
+}
+
+struct Arguments {
+    file_name: String,
+    unique: bool,
+}
+
+impl Arguments {
+    fn new() -> Result<Self, &'static str> {
+        let args = env::args().skip(SKIP_CHALLENGE_PATH);
+        let mut file_name = None;
+        let mut unique = false;
+        for arg in args {
+            if arg.ends_with(".txt") {
+                file_name = Some(arg)
+            } else if &arg == "-u" {
+                unique = true;
+            }
+        }
+        let file_name = file_name.ok_or("Failed to get file_name")?;
+
+        Ok(Arguments { file_name, unique })
+    }
 }
