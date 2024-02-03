@@ -1,3 +1,5 @@
+pub mod sort;
+
 use std::{
     env,
     error::Error,
@@ -28,11 +30,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let lines = reader.lines().flatten();
 
-    let sorted_content = if args.unique {
-        lines.unique().sorted()
+    let content = if args.unique {
+        lines.unique().collect_vec()
     } else {
-        lines.sorted()
+        lines.collect_vec()
     };
+
+    let sorted_content = sort::sort(content, &args.sort_algorithm);
 
     for content in sorted_content {
         write_to_output(format!("{}\n", content).as_bytes())?;
@@ -44,6 +48,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 struct Arguments {
     file_name: String,
     unique: bool,
+    sort_algorithm: String,
 }
 
 impl Arguments {
@@ -51,15 +56,24 @@ impl Arguments {
         let args = env::args().skip(SKIP_CHALLENGE_PATH);
         let mut file_name = None;
         let mut unique = false;
+        let mut sort_algorithm = None;
         for arg in args {
             if arg.ends_with(".txt") {
                 file_name = Some(arg)
             } else if &arg == "-u" {
                 unique = true;
+            } else if arg.starts_with("-sort=") {
+                sort_algorithm = Some(arg.replace("-sort=", ""));
+            } else if arg == "-random-sort" || arg == "-R" {
+                sort_algorithm = Some("randomsort".to_string());
             }
         }
         let file_name = file_name.ok_or("Failed to get file_name")?;
 
-        Ok(Arguments { file_name, unique })
+        Ok(Arguments {
+            file_name,
+            unique,
+            sort_algorithm: sort_algorithm.unwrap_or_default(),
+        })
     }
 }
