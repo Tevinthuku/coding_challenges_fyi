@@ -58,14 +58,22 @@ impl Arguments {
         let mut unique = false;
         let mut sort_algorithm = None;
         for arg in args {
-            if arg.ends_with(".txt") {
-                file_name = Some(arg)
-            } else if &arg == "-u" {
-                unique = true;
-            } else if arg.starts_with("-sort=") {
-                sort_algorithm = Some(arg.replace("-sort=", ""));
-            } else if arg == "-random-sort" || arg == "-R" {
-                sort_algorithm = Some("randomsort".to_string());
+            match arg.as_str() {
+                "-u" => {
+                    unique = true;
+                }
+                "-random-sort" | "-R" => {
+                    sort_algorithm = Some("randomsort".to_string());
+                }
+                arg if arg.starts_with("-sort=") => {
+                    sort_algorithm = Some(arg.replace("-sort=", ""));
+                }
+                arg if arg.ends_with(".txt") => {
+                    file_name = Some(arg.to_owned());
+                }
+                _ => {
+                    continue;
+                }
             }
         }
         let file_name = file_name.ok_or("Failed to get file_name")?;
