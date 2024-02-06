@@ -1,6 +1,6 @@
 use std::iter::Peekable;
 
-use anyhow::{bail, Context};
+use anyhow::{anyhow, bail, Context};
 
 #[derive(Debug, PartialEq, Clone)]
 enum Token {
@@ -12,6 +12,7 @@ enum Token {
     Boolean(bool),
     Double(f64),
     Array(Vec<Token>),
+    Null,
 }
 
 struct Tokenizer(Peekable<std::str::Chars<'static>>);
@@ -117,6 +118,14 @@ impl Tokenizer {
         Ok(result)
     }
 
+    fn null(&mut self) -> anyhow::Result<()> {
+        let content = self.string();
+        if !content.is_empty() {
+            bail!("Invalid null: {}", content);
+        }
+        Ok(())
+    }
+
     fn deserialize(&mut self) -> Option<anyhow::Result<Token>> {
         let ch = match self.0.next() {
             Some(ch) => ch,
@@ -136,7 +145,11 @@ impl Tokenizer {
             '#' => self.boolean().map(Token::Boolean),
             ',' => self.double().map(Token::Double),
             '*' => self.array().map(Token::Array),
-            _ => todo!(),
+            '_' => {
+                let _ = self.null();
+                Ok(Token::Null)
+            }
+            ch => Err(anyhow!("Invalid character: {}", ch)),
         };
         Some(content)
     }
@@ -168,6 +181,7 @@ mod tests {
         Token::SimpleString("Foo".to_string()),
         Token::Error("Bar".to_string())
     ]))]
+    #[case("_\r\n", Token::Null)]
     fn test_content(#[case] input: &'static str, #[case] expected: super::Token) {
         let mut tokenizer = Tokenizer::new(input);
         let result = tokenizer.deserialize().unwrap().unwrap();
