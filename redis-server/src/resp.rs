@@ -3,7 +3,7 @@ use std::iter::Peekable;
 use anyhow::{anyhow, bail, Context};
 
 #[derive(Debug, PartialEq, Clone)]
-enum Token {
+pub enum Frame {
     SimpleString(String),
     BulkString { content: String, length: usize },
     NullBulkString,
@@ -11,180 +11,183 @@ enum Token {
     Integer(i64),
     Boolean(bool),
     Double(f64),
-    Array(Vec<Token>),
+    Array(Vec<Frame>),
     Null,
 }
 
-struct Tokenizer(Peekable<std::str::Chars<'static>>);
-
-impl Tokenizer {
-    fn new(content: &'static str) -> Self {
-        let chars = content.chars().peekable();
-        Tokenizer(chars)
+impl Frame {
+    pub fn deserialize(content: String) -> Option<anyhow::Result<Frame>> {
+        let mut chars = content.chars().peekable();
+        deserialize(&mut chars)
+    }
+    pub fn serialize(self) -> String {
+        let serializer = |content: String| format!("{}\r\n", content);
+        match self {
+            Frame::SimpleString(content) => serializer(format!("+{}", content)),
+            Frame::Error(content) => serializer(format!("-{}", content)),
+            _ => unimplemented!(),
+        }
     }
 
-    fn string(&mut self) -> String {
-        let mut result = String::new();
+    pub fn new_error(message: String) -> Frame {
+        Frame::Error(message)
+    }
+}
 
-        while let Some(ch) = self.0.next() {
-            match ch {
-                '\r' if matches!(self.0.peek(), Some('\n')) => {
-                    let _dash_n = self.0.next();
-                    break;
-                }
-                ch => {
-                    result.push(ch);
-                }
+fn deserialize(iter: &mut Peekable<std::str::Chars>) -> Option<anyhow::Result<Frame>> {
+    let ch = match iter.next() {
+        Some(ch) => ch,
+        None => return None,
+    };
+
+    let content = match ch {
+        '+' => Ok(Frame::SimpleString(string(iter).into())),
+        '-' => Ok(Frame::Error(string(iter))),
+        ':' => integer(iter).map(Frame::Integer),
+        '$' if iter.peek() == Some(&'-') => null_bulk_string(iter).map(|_| Frame::NullBulkString),
+        '$' => bulk_string(iter).map(|(content, length)| Frame::BulkString { content, length }),
+        '#' => boolean(iter).map(Frame::Boolean),
+        ',' => double(iter).map(Frame::Double),
+        '*' => array(iter).map(Frame::Array),
+        '_' => {
+            let _ = null(iter);
+            Ok(Frame::Null)
+        }
+        ch => Err(anyhow!("Invalid character: {}", ch)),
+    };
+    Some(content)
+}
+
+fn boolean(iter: &mut Peekable<std::str::Chars>) -> anyhow::Result<bool> {
+    let content = string(iter);
+    match content.as_str() {
+        "t" => Ok(true),
+        "f" => Ok(false),
+        _ => bail!("Invalid boolean: {}", content),
+    }
+}
+
+fn array(iter: &mut Peekable<std::str::Chars>) -> anyhow::Result<Vec<Frame>> {
+    let length = integer(iter)?;
+    if length < 0 {
+        bail!("Invalid length for array: {}", length);
+    }
+    let mut result = Vec::with_capacity(length as usize);
+    for _ in 0..length {
+        let frame = deserialize(iter).transpose()?;
+        if let Some(frame) = frame {
+            result.push(frame);
+        } else {
+            let current_length = result.len();
+            bail!("Expected {length} elements in array, but got {current_length}")
+        }
+    }
+    Ok(result)
+}
+
+fn bulk_string(iter: &mut Peekable<std::str::Chars>) -> anyhow::Result<(String, usize)> {
+    let length = integer(iter)?;
+    if length < 0 {
+        bail!("Invalid length for bulk string: {}", length);
+    }
+    let content = string(iter);
+    Ok((content, length as usize))
+}
+
+fn null_bulk_string(iter: &mut Peekable<std::str::Chars>) -> anyhow::Result<()> {
+    let length = integer(iter)?;
+    if length != -1 {
+        bail!("Invalid length for null bulk string: {}", length);
+    }
+    let content = string(iter);
+    if !content.is_empty() {
+        bail!("Invalid content for null bulk string: {}", content);
+    }
+    Ok(())
+}
+
+fn integer(iter: &mut Peekable<std::str::Chars>) -> anyhow::Result<i64> {
+    let multiplication_factor = iter
+        .next_if(|&x| x == '+' || x == '-')
+        .map(|ch| if ch == '-' { -1 } else { 1 })
+        .unwrap_or(1);
+
+    let number = string(iter);
+    let number = number
+        .parse::<i64>()
+        .with_context(|| format!("Invalid number: {}", number))?;
+    Ok(number * multiplication_factor)
+}
+
+fn double(iter: &mut Peekable<std::str::Chars>) -> anyhow::Result<f64> {
+    let multiplication_factor = iter
+        .next_if(|&x| x == '+' || x == '-')
+        .map(|ch| if ch == '-' { -1 } else { 1 })
+        .unwrap_or(1);
+
+    let number = string(iter);
+
+    let number = number
+        .parse::<f64>()
+        .with_context(|| format!("Invalid double: {}", number))?;
+
+    Ok(number * multiplication_factor as f64)
+}
+
+fn null(iter: &mut Peekable<std::str::Chars>) -> anyhow::Result<()> {
+    let content = string(iter);
+    if !content.is_empty() {
+        bail!("Invalid null: {}", content);
+    }
+    Ok(())
+}
+
+fn string(iter: &mut Peekable<std::str::Chars>) -> String {
+    let mut result = String::new();
+
+    while let Some(ch) = iter.next() {
+        match ch {
+            '\r' if matches!(iter.peek(), Some('\n')) => {
+                let _dash_n = iter.next();
+                break;
+            }
+            ch => {
+                result.push(ch);
             }
         }
-        result
     }
-
-    fn integer(&mut self) -> anyhow::Result<i64> {
-        let multiplication_factor = self
-            .0
-            .next_if(|&x| x == '+' || x == '-')
-            .map(|ch| if ch == '-' { -1 } else { 1 })
-            .unwrap_or(1);
-
-        let number = self.string();
-        let number = number
-            .parse::<i64>()
-            .with_context(|| format!("Invalid number: {}", number))?;
-        Ok(number * multiplication_factor)
-    }
-
-    fn double(&mut self) -> anyhow::Result<f64> {
-        let multiplication_factor = self
-            .0
-            .next_if(|&x| x == '+' || x == '-')
-            .map(|ch| if ch == '-' { -1 } else { 1 })
-            .unwrap_or(1);
-
-        let number = self.string();
-
-        let number = number
-            .parse::<f64>()
-            .with_context(|| format!("Invalid double: {}", number))?;
-
-        Ok(number * multiplication_factor as f64)
-    }
-
-    fn bulk_string(&mut self) -> anyhow::Result<(String, usize)> {
-        let length = self.integer()?;
-        if length < 0 {
-            bail!("Invalid length for bulk string: {}", length);
-        }
-        let content = self.string();
-        Ok((content, length as usize))
-    }
-
-    fn null_bulk_string(&mut self) -> anyhow::Result<()> {
-        let length = self.integer()?;
-        if length != -1 {
-            bail!("Invalid length for null bulk string: {}", length);
-        }
-        let content = self.string();
-        if !content.is_empty() {
-            bail!("Invalid content for null bulk string: {}", content);
-        }
-        Ok(())
-    }
-
-    fn boolean(&mut self) -> anyhow::Result<bool> {
-        let content = self.string();
-        match content.as_str() {
-            "t" => Ok(true),
-            "f" => Ok(false),
-            _ => bail!("Invalid boolean: {}", content),
-        }
-    }
-
-    fn array(&mut self) -> anyhow::Result<Vec<Token>> {
-        let length = self.integer()?;
-        if length < 0 {
-            bail!("Invalid length for array: {}", length);
-        }
-        let mut result = Vec::with_capacity(length as usize);
-        for _ in 0..length {
-            let token = self.deserialize().transpose()?;
-            if let Some(token) = token {
-                result.push(token);
-            } else {
-                let current_length = result.len();
-                bail!("Expected {length} elements in array, but got {current_length}")
-            }
-        }
-        Ok(result)
-    }
-
-    fn null(&mut self) -> anyhow::Result<()> {
-        let content = self.string();
-        if !content.is_empty() {
-            bail!("Invalid null: {}", content);
-        }
-        Ok(())
-    }
-
-    fn deserialize(&mut self) -> Option<anyhow::Result<Token>> {
-        let ch = match self.0.next() {
-            Some(ch) => ch,
-            None => return None,
-        };
-
-        let content = match ch {
-            '+' => Ok(Token::SimpleString(self.string())),
-            '-' => Ok(Token::Error(self.string())),
-            ':' => self.integer().map(Token::Integer),
-            '$' if self.0.peek() == Some(&'-') => {
-                self.null_bulk_string().map(|_| Token::NullBulkString)
-            }
-            '$' => self
-                .bulk_string()
-                .map(|(content, length)| Token::BulkString { content, length }),
-            '#' => self.boolean().map(Token::Boolean),
-            ',' => self.double().map(Token::Double),
-            '*' => self.array().map(Token::Array),
-            '_' => {
-                let _ = self.null();
-                Ok(Token::Null)
-            }
-            ch => Err(anyhow!("Invalid character: {}", ch)),
-        };
-        Some(content)
-    }
+    result
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Token;
-    use super::Tokenizer;
+
+    use super::Frame;
     use rstest::rstest;
 
     #[rstest]
-    #[case("+OK\r\n", Token::SimpleString("OK".to_string()))]
-    #[case("-Error message\r\n", Token::Error("Error message".to_string()))]
-    #[case(":1000\r\n", Token::Integer(1000))]
-    #[case(":-1000\r\n", Token::Integer(-1000))]
-    #[case("$6\r\nfoobar\r\n", Token::BulkString {
+    #[case("+OK\r\n", Frame::SimpleString("OK".into()))]
+    #[case("-Error message\r\n", Frame::Error("Error message".into()))]
+    #[case(":1000\r\n", Frame::Integer(1000))]
+    #[case(":-1000\r\n", Frame::Integer(-1000))]
+    #[case("$6\r\nfoobar\r\n", Frame::BulkString {
         content: "foobar".to_string(),
         length: 6
     })]
-    #[case("$-1\r\n", Token::NullBulkString)]
-    #[case("#t\r\n", Token::Boolean(true))]
-    #[case("#f\r\n", Token::Boolean(false))]
-    #[case(",3.15\r\n", Token::Double(3.15_f64))]
-    #[case(",-3.15\r\n", Token::Double(-3.15_f64))]
-    #[case(",3\r\n", Token::Double(3_f64))]
-    #[case("*0\r\n", Token::Array(vec![]))]
-    #[case("*2\r\n+Foo\r\n-Bar\r\n", Token::Array(vec![
-        Token::SimpleString("Foo".to_string()),
-        Token::Error("Bar".to_string())
+    #[case("$-1\r\n", Frame::NullBulkString)]
+    #[case("#t\r\n", Frame::Boolean(true))]
+    #[case("#f\r\n", Frame::Boolean(false))]
+    #[case(",3.15\r\n", Frame::Double(3.15_f64))]
+    #[case(",-3.15\r\n", Frame::Double(-3.15_f64))]
+    #[case(",3\r\n", Frame::Double(3_f64))]
+    #[case("*0\r\n", Frame::Array(vec![]))]
+    #[case("*2\r\n+Foo\r\n-Bar\r\n", Frame::Array(vec![
+        Frame::SimpleString("Foo".into()),
+        Frame::Error("Bar".into())
     ]))]
-    #[case("_\r\n", Token::Null)]
-    fn test_content(#[case] input: &'static str, #[case] expected: super::Token) {
-        let mut tokenizer = Tokenizer::new(input);
-        let result = tokenizer.deserialize().unwrap().unwrap();
+    #[case("_\r\n", Frame::Null)]
+    fn test_content(#[case] input: &'static str, #[case] expected: super::Frame) {
+        let result = Frame::deserialize(input.to_owned()).unwrap().unwrap();
         assert_eq!(result, expected);
     }
 }
