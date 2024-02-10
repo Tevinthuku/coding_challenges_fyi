@@ -41,6 +41,27 @@ impl Frame {
                 buf.put(content.as_bytes());
                 buf.put(&b"\r\n"[..]);
             }
+            Frame::Boolean(bool) => {
+                buf.put(&b"#"[..]);
+                buf.put(&if bool { b"t" } else { b"f" }[..]);
+                buf.put(&b"\r\n"[..]);
+            }
+            Frame::Integer(val) => {
+                buf.put(&b":"[..]);
+                if val < 0 {
+                    buf.put(&b"-"[..]);
+                }
+                buf.put(val.to_string().as_bytes());
+                buf.put(&b"\r\n"[..]);
+            }
+            Frame::Double(val) => {
+                buf.put(&b","[..]);
+                if val < 0.0 {
+                    buf.put(&b"-"[..]);
+                }
+                buf.put(val.to_string().as_bytes());
+                buf.put(&b"\r\n"[..]);
+            }
             _ => unimplemented!(),
         }
         buf.freeze()
