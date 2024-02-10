@@ -1,5 +1,5 @@
 use log::error;
-use redis_server::resp::Frame;
+use redis_server::{cmd::Command, resp::Frame};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -31,7 +31,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 let frame = redis_server::resp::Frame::deserialize(content.clone()).transpose();
                 let frame = match frame {
-                    Ok(Some(frame)) => redis_server::cmd::execute_command(frame)
+                    Ok(Some(frame)) => Command::from_frame(frame)
+                        .map(|command| command.execute())
                         .unwrap_or_else(|err| Frame::Error(err.to_string())),
                     Ok(None) => Frame::Error(format!("Could not parse frame from {}", content)),
                     Err(err) => Frame::Error(err.to_string()),

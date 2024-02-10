@@ -1,12 +1,21 @@
 use super::ParseFrames;
 use crate::resp::Frame;
 
-pub fn parse(parser: &mut ParseFrames) -> anyhow::Result<Frame> {
-    let optional_message = parser.next_string();
+pub struct Ping {
+    optional_message: Option<String>,
+}
 
-    if let Some(message) = optional_message {
-        Ok(Frame::new_bulk_string(message))
-    } else {
-        Ok(Frame::SimpleString("PONG".to_string()))
+impl Ping {
+    pub fn parse(parser: &mut ParseFrames) -> Self {
+        let optional_message = parser.next_string();
+        Self { optional_message }
+    }
+
+    pub fn execute(self) -> Frame {
+        if let Some(message) = self.optional_message {
+            Frame::SimpleString(message)
+        } else {
+            Frame::SimpleString("PONG".to_string())
+        }
     }
 }
