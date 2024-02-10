@@ -1,6 +1,7 @@
 use std::iter::Peekable;
 
 use anyhow::{anyhow, bail, Context};
+use bytes::{BufMut, Bytes, BytesMut};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Frame {
@@ -20,17 +21,52 @@ impl Frame {
         let mut chars = content.chars().peekable();
         deserialize(&mut chars)
     }
-    pub fn serialize(self) -> String {
-        let serializer = |content: String| format!("{}\r\n", content);
+    pub fn serialize(self) -> Bytes {
+        let mut buf = BytesMut::new();
         match self {
-            Frame::SimpleString(content) => serializer(format!("+{}", content)),
-            Frame::Error(content) => serializer(format!("-{}", content)),
+            Frame::SimpleString(content) => {
+                buf.put(&b"+"[..]);
+                buf.put(content.as_bytes());
+                buf.put(&b"\r\n"[..]);
+            }
+            Frame::Error(content) => {
+                buf.put(&b"-"[..]);
+                buf.put(content.as_bytes());
+                buf.put(&b"\r\n"[..]);
+            }
+            Frame::BulkString { content, length } => {
+                buf.put(&b"$"[..]);
+                buf.put(length.to_string().as_bytes());
+                buf.put(&b"\r\n"[..]);
+                buf.put(content.as_bytes());
+                buf.put(&b"\r\n"[..]);
+            }
             _ => unimplemented!(),
         }
+        buf.freeze()
     }
 
     pub fn new_error(message: String) -> Frame {
         Frame::Error(message)
+    }
+
+    pub(crate) fn name(&self) -> &'static str {
+        match self {
+            Frame::SimpleString(_) => "SimpleString",
+            Frame::BulkString { .. } => "BulkString",
+            Frame::NullBulkString => "NullBulkString",
+            Frame::Error(_) => "Error",
+            Frame::Integer(_) => "Integer",
+            Frame::Boolean(_) => "Boolean",
+            Frame::Double(_) => "Double",
+            Frame::Array(_) => "Array",
+            Frame::Null => "Null",
+        }
+    }
+
+    pub(crate) fn new_bulk_string(content: String) -> Frame {
+        let length = content.len();
+        Frame::BulkString { content, length }
     }
 }
 
@@ -41,7 +77,7 @@ fn deserialize(iter: &mut Peekable<std::str::Chars>) -> Option<anyhow::Result<Fr
     };
 
     let content = match ch {
-        '+' => Ok(Frame::SimpleString(string(iter).into())),
+        '+' => Ok(Frame::SimpleString(string(iter))),
         '-' => Ok(Frame::Error(string(iter))),
         ':' => integer(iter).map(Frame::Integer),
         '$' if iter.peek() == Some(&'-') => null_bulk_string(iter).map(|_| Frame::NullBulkString),
