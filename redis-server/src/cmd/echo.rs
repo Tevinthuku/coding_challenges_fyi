@@ -1,6 +1,8 @@
+use std::io;
+
 use super::ParseFrames;
-use crate::cmd::anyhow;
 use crate::resp::Frame;
+use crate::{cmd::anyhow, connection::Connection};
 
 pub struct Echo {
     message: String,
@@ -14,7 +16,9 @@ impl Echo {
         Ok(Self { message })
     }
 
-    pub fn execute(self) -> Frame {
-        Frame::new_bulk_string(self.message)
+    pub async fn execute(self, conn: &mut Connection) -> io::Result<()> {
+        let frame = Frame::new_bulk_string(self.message);
+
+        conn.write_frame(frame).await
     }
 }

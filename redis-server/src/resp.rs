@@ -1,7 +1,5 @@
-use std::iter::Peekable;
-
 use anyhow::{anyhow, bail, Context};
-use bytes::{BufMut, Bytes, BytesMut};
+use std::iter::Peekable;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Frame {
@@ -17,54 +15,9 @@ pub enum Frame {
 }
 
 impl Frame {
-    pub fn deserialize(content: String) -> Option<anyhow::Result<Frame>> {
+    pub fn deserialize(content: String) -> anyhow::Result<Frame> {
         let mut chars = content.chars().peekable();
-        deserialize(&mut chars)
-    }
-    pub fn serialize(self) -> Bytes {
-        let mut buf = BytesMut::new();
-        match self {
-            Frame::SimpleString(content) => {
-                buf.put(&b"+"[..]);
-                buf.put(content.as_bytes());
-                buf.put(&b"\r\n"[..]);
-            }
-            Frame::Error(content) => {
-                buf.put(&b"-"[..]);
-                buf.put(content.as_bytes());
-                buf.put(&b"\r\n"[..]);
-            }
-            Frame::BulkString { content, length } => {
-                buf.put(&b"$"[..]);
-                buf.put(length.to_string().as_bytes());
-                buf.put(&b"\r\n"[..]);
-                buf.put(content.as_bytes());
-                buf.put(&b"\r\n"[..]);
-            }
-            Frame::Boolean(bool) => {
-                buf.put(&b"#"[..]);
-                buf.put(&if bool { b"t" } else { b"f" }[..]);
-                buf.put(&b"\r\n"[..]);
-            }
-            Frame::Integer(val) => {
-                buf.put(&b":"[..]);
-                if val < 0 {
-                    buf.put(&b"-"[..]);
-                }
-                buf.put(val.to_string().as_bytes());
-                buf.put(&b"\r\n"[..]);
-            }
-            Frame::Double(val) => {
-                buf.put(&b","[..]);
-                if val < 0.0 {
-                    buf.put(&b"-"[..]);
-                }
-                buf.put(val.to_string().as_bytes());
-                buf.put(&b"\r\n"[..]);
-            }
-            _ => unimplemented!(),
-        }
-        buf.freeze()
+        deserialize(&mut chars).ok_or_else(|| anyhow!("Could not parse frame from {}", content))?
     }
 
     pub fn new_error(message: String) -> Frame {
@@ -244,7 +197,7 @@ mod tests {
     ]))]
     #[case("_\r\n", Frame::Null)]
     fn test_content(#[case] input: &'static str, #[case] expected: super::Frame) {
-        let result = Frame::deserialize(input.to_owned()).unwrap().unwrap();
+        let result = Frame::deserialize(input.to_owned()).unwrap();
         assert_eq!(result, expected);
     }
 }

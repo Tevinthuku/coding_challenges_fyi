@@ -1,11 +1,13 @@
 mod echo;
 mod ping;
 
+use std::io;
+
 use ping::Ping;
 
 use anyhow::{anyhow, bail};
 
-use crate::resp::Frame;
+use crate::{connection::Connection, resp::Frame};
 
 use self::echo::Echo;
 
@@ -36,10 +38,10 @@ impl Command {
         }
     }
 
-    pub fn execute(self) -> Frame {
+    pub async fn execute(self, conn: &mut Connection) -> io::Result<()> {
         match self {
-            Command::Ping(ping) => ping.execute(),
-            Command::Echo(echo) => echo.execute(),
+            Command::Ping(ping) => ping.execute(conn).await,
+            Command::Echo(echo) => echo.execute(conn).await,
         }
     }
 }
