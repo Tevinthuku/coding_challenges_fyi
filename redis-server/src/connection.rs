@@ -9,7 +9,7 @@ use tokio::{
 
 use tokio::io::BufWriter;
 
-use crate::resp::Frame;
+use crate::frame::Frame;
 
 pub struct Connection {
     stream: BufWriter<TcpStream>,

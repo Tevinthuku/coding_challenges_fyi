@@ -1,7 +1,7 @@
 use std::io;
 
 use super::ParseFrames;
-use crate::{connection::Connection, resp::Frame};
+use crate::{connection::Connection, frame::Frame};
 
 pub struct Ping {
     optional_message: Option<String>,

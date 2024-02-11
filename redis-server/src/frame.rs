@@ -172,7 +172,7 @@ fn string(iter: &mut Peekable<std::str::Chars>) -> String {
 #[cfg(test)]
 mod tests {
 
-    use super::Frame;
+    use crate::frame::Frame;
     use rstest::rstest;
 
     #[rstest]
@@ -196,7 +196,7 @@ mod tests {
         Frame::Error("Bar".into())
     ]))]
     #[case("_\r\n", Frame::Null)]
-    fn test_content(#[case] input: &'static str, #[case] expected: super::Frame) {
+    fn test_content(#[case] input: &'static str, #[case] expected: crate::frame::Frame) {
         let result = Frame::deserialize(input.to_owned()).unwrap();
         assert_eq!(result, expected);
     }

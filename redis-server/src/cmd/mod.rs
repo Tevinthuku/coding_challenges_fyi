@@ -7,7 +7,7 @@ use ping::Ping;
 
 use anyhow::{anyhow, bail};
 
-use crate::{connection::Connection, resp::Frame};
+use crate::{connection::Connection, frame::Frame};
 
 use self::echo::Echo;
 

@@ -1,7 +1,7 @@
 use std::io;
 
 use super::ParseFrames;
-use crate::resp::Frame;
+use crate::frame::Frame;
 use crate::{cmd::anyhow, connection::Connection};
 
 pub struct Echo {
