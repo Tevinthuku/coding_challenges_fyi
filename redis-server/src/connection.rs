@@ -80,6 +80,10 @@ impl Connection {
                 self.stream.write_all(val.to_string().as_bytes()).await?;
                 self.stream.write_all(b"\r\n").await?;
             }
+            Frame::Null => {
+                self.stream.write_u8(b'_').await?;
+                self.stream.write_all(b"\r\n").await?;
+            }
             _ => unimplemented!(),
         }
 

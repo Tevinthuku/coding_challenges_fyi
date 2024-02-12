@@ -1,19 +1,25 @@
 mod echo;
+pub mod get;
 mod ping;
+pub mod set;
 
 use std::io;
 
+use log::{error, warn};
 use ping::Ping;
 
 use anyhow::{anyhow, bail};
 
-use crate::{connection::Connection, frame::Frame};
+use crate::{connection::Connection, db::Db, frame::Frame};
 
-use self::echo::Echo;
+use self::{echo::Echo, get::Get, set::Set};
 
 pub enum Command {
     Ping(Ping),
     Echo(Echo),
+    Set(Set),
+    Get(Get),
+    Unknown,
 }
 
 impl Command {
@@ -34,14 +40,25 @@ impl Command {
         match command.as_str() {
             "ping" => Ok(Command::Ping(Ping::parse(&mut parser))),
             "echo" => Ok(Command::Echo(Echo::parse(&mut parser)?)),
-            _ => unimplemented!(),
+            "set" => Ok(Command::Set(Set::parse(&mut parser)?)),
+            "get" => Ok(Command::Get(Get::parse(&mut parser)?)),
+            command => {
+                warn!("command: {command}");
+                Ok(Command::Unknown)
+            }
         }
     }
 
-    pub async fn execute(self, conn: &mut Connection) -> io::Result<()> {
+    pub async fn execute(self, conn: &mut Connection, db: &Db) -> io::Result<()> {
         match self {
             Command::Ping(ping) => ping.execute(conn).await,
             Command::Echo(echo) => echo.execute(conn).await,
+            Command::Set(set) => set.execute(conn, db).await,
+            Command::Get(get) => get.execute(conn, db).await,
+            Command::Unknown => {
+                let frame = Frame::Error("ERR unknown command".to_string());
+                conn.write_frame(frame).await
+            }
         }
     }
 }
