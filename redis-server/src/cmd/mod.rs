@@ -5,7 +5,7 @@ pub mod set;
 
 use std::io;
 
-use log::{error, warn};
+use log::warn;
 use ping::Ping;
 
 use anyhow::{anyhow, bail};

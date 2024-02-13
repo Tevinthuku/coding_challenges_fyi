@@ -1,6 +1,6 @@
 use std::io;
 
-use anyhow::{bail, Context};
+use anyhow::Context;
 use bytes::BytesMut;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -24,20 +24,23 @@ impl Connection {
         }
     }
 
-    pub async fn read(&mut self) -> anyhow::Result<Option<String>> {
-        if 0 == self.stream.read_buf(&mut self.buffer).await? {
-            if self.buffer.is_empty() {
-                return Ok(None);
-            } else {
-                bail!("Connection reset by peer")
-            }
+    pub async fn read_bytes(&mut self) -> anyhow::Result<Option<BytesMut>> {
+        let n = self
+            .stream
+            .read_buf(&mut self.buffer)
+            .await
+            .context("Failed to read buffer")?;
+
+        if n == 0 {
+            return Ok(None);
         }
 
-        let content = self.buffer.to_vec();
-        let content =
-            String::from_utf8(content).context("Failed to convert data to readable format")?;
+        Ok(Some(self.buffer.clone()))
+    }
 
-        Ok(Some(content))
+    pub async fn send_error(&mut self, err: &str) -> io::Result<()> {
+        let frame = Frame::Error(err.to_string());
+        self.write_frame(frame).await
     }
 
     pub async fn write_frame(&mut self, frame: Frame) -> io::Result<()> {
