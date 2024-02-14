@@ -5,10 +5,11 @@ pub mod set;
 
 use std::io;
 
+use bytes::Bytes;
 use log::warn;
 use ping::Ping;
 
-use anyhow::{anyhow, bail};
+use anyhow::{anyhow, bail, Context};
 
 use crate::{connection::Connection, db::Db, frame::Frame};
 
@@ -34,11 +35,12 @@ impl Command {
 
         let command = parser
             .next_string()
-            .ok_or(anyhow!("Expected command but did not find one"))?
+            .context("Failed to parse command")?
+            .ok_or_else(|| anyhow!("Expected a command but found nothing"))?
             .to_lowercase();
 
         match command.as_str() {
-            "ping" => Ok(Command::Ping(Ping::parse(&mut parser))),
+            "ping" => Ok(Command::Ping(Ping::parse(&mut parser)?)),
             "echo" => Ok(Command::Echo(Echo::parse(&mut parser)?)),
             "set" => Ok(Command::Set(Set::parse(&mut parser)?)),
             "get" => Ok(Command::Get(Get::parse(&mut parser)?)),
@@ -74,10 +76,23 @@ impl ParseFrames {
         }
     }
 
-    fn next_string(&mut self) -> Option<String> {
+    fn next_string(&mut self) -> anyhow::Result<Option<String>> {
         match self.items.next() {
-            Some(Frame::SimpleString(s)) => Some(s),
-            Some(Frame::BulkString { content, .. }) => Some(content),
+            Some(Frame::SimpleString(s)) => Ok(Some(s)),
+            Some(Frame::BulkString(bytes)) => std::str::from_utf8(&bytes[..])
+                .map(|s| Some(s.to_string()))
+                .context("Failed to parse string"),
+            None => Ok(None),
+            _ => {
+                bail!("Expected a string but did not find one")
+            }
+        }
+    }
+
+    fn next_bytes(&mut self) -> Option<Bytes> {
+        match self.items.next() {
+            Some(Frame::SimpleString(s)) => Some(s.into()),
+            Some(Frame::BulkString(bytes)) => Some(bytes),
             _ => None,
         }
     }

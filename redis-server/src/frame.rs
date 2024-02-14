@@ -1,10 +1,10 @@
 use anyhow::{anyhow, bail, Context};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::iter::Peekable;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Frame {
     SimpleString(String),
-    BulkString { content: String, length: usize },
     NullBulkString,
     Error(String),
     Integer(i64),
@@ -12,12 +12,13 @@ pub enum Frame {
     Double(f64),
     Array(Vec<Frame>),
     Null,
+    BulkString(Bytes),
 }
 
 impl Frame {
-    pub fn deserialize(content: String) -> anyhow::Result<Frame> {
-        let mut chars = content.chars().peekable();
-        deserialize(&mut chars).ok_or_else(|| anyhow!("Could not parse frame from {}", content))?
+    pub fn deserialize(content: &BytesMut) -> anyhow::Result<Frame> {
+        let mut x = content.iter().peekable();
+        deserialize(&mut x)
     }
 
     pub fn new_error(message: String) -> Frame {
@@ -38,104 +39,82 @@ impl Frame {
         }
     }
 
-    pub(crate) fn new_bulk_string(content: String) -> Frame {
-        let length = content.len();
-        Frame::BulkString { content, length }
+    pub(crate) fn new_bulk_string(content: Bytes) -> Frame {
+        Frame::BulkString(content)
     }
 }
 
-fn deserialize(iter: &mut Peekable<std::str::Chars>) -> Option<anyhow::Result<Frame>> {
+impl Frame {}
+
+fn deserialize(iter: &mut Peekable<std::slice::Iter<u8>>) -> anyhow::Result<Frame> {
     let ch = match iter.next() {
         Some(ch) => ch,
-        None => return None,
+        None => bail!("Expected a character, but got nothing"),
     };
 
     let content = match ch {
-        '+' => Ok(Frame::SimpleString(string(iter))),
-        '-' => Ok(Frame::Error(string(iter))),
-        ':' => integer(iter).map(Frame::Integer),
-        '$' if iter.peek() == Some(&'-') => null_bulk_string(iter).map(|_| Frame::NullBulkString),
-        '$' => bulk_string(iter).map(|(content, length)| Frame::BulkString { content, length }),
-        '#' => boolean(iter).map(Frame::Boolean),
-        ',' => double(iter).map(Frame::Double),
-        '*' => array(iter).map(Frame::Array),
-        '_' => {
+        b'+' => Ok(Frame::SimpleString(string(iter)?)),
+        b'-' => Ok(Frame::Error(string(iter)?)),
+        b':' => integer(iter).map(Frame::Integer),
+        b'$' if iter.peek() == Some(&&b'-') => {
+            null_bulk_string(iter).map(|_| Frame::NullBulkString)
+        }
+        b'$' => {
+            let bytes = bulk_string(iter)?;
+            Ok(Frame::BulkString(bytes))
+        }
+        b'#' => boolean(iter).map(Frame::Boolean),
+        b',' => double(iter).map(Frame::Double),
+        b'*' => array(iter).map(Frame::Array),
+        b'_' => {
             let _ = null(iter);
             Ok(Frame::Null)
         }
         ch => Err(anyhow!("Invalid character: {}", ch)),
     };
-    Some(content)
+    content
 }
 
-fn boolean(iter: &mut Peekable<std::str::Chars>) -> anyhow::Result<bool> {
-    let content = string(iter);
-    match content.as_str() {
-        "t" => Ok(true),
-        "f" => Ok(false),
-        _ => bail!("Invalid boolean: {}", content),
+fn bulk_string(iter: &mut Peekable<std::slice::Iter<u8>>) -> anyhow::Result<Bytes> {
+    let length = integer(iter)?;
+    if length < 0 {
+        bail!("Invalid length for bulk string: {}", length);
     }
+    let content = get_bytes(iter)?;
+    if content.len() as i64 != length {
+        bail!("Invalid content length for bulk string: {:?}", content);
+    }
+    Ok(content)
 }
 
-fn array(iter: &mut Peekable<std::str::Chars>) -> anyhow::Result<Vec<Frame>> {
+fn null(iter: &mut Peekable<std::slice::Iter<u8>>) -> anyhow::Result<()> {
+    let content = get_bytes(iter)?;
+    if !content.is_empty() {
+        bail!("Invalid null: {:?}", content);
+    }
+    Ok(())
+}
+
+fn array(iter: &mut Peekable<std::slice::Iter<u8>>) -> anyhow::Result<Vec<Frame>> {
     let length = integer(iter)?;
     if length < 0 {
         bail!("Invalid length for array: {}", length);
     }
     let mut result = Vec::with_capacity(length as usize);
     for _ in 0..length {
-        let frame = deserialize(iter).transpose()?;
-        if let Some(frame) = frame {
-            result.push(frame);
-        } else {
-            let current_length = result.len();
-            bail!("Expected {length} elements in array, but got {current_length}")
-        }
+        let frame = deserialize(iter);
+        result.push(frame?);
     }
     Ok(result)
 }
 
-fn bulk_string(iter: &mut Peekable<std::str::Chars>) -> anyhow::Result<(String, usize)> {
-    let length = integer(iter)?;
-    if length < 0 {
-        bail!("Invalid length for bulk string: {}", length);
-    }
-    let content = string(iter);
-    Ok((content, length as usize))
-}
-
-fn null_bulk_string(iter: &mut Peekable<std::str::Chars>) -> anyhow::Result<()> {
-    let length = integer(iter)?;
-    if length != -1 {
-        bail!("Invalid length for null bulk string: {}", length);
-    }
-    let content = string(iter);
-    if !content.is_empty() {
-        bail!("Invalid content for null bulk string: {}", content);
-    }
-    Ok(())
-}
-
-fn integer(iter: &mut Peekable<std::str::Chars>) -> anyhow::Result<i64> {
+fn double(iter: &mut Peekable<std::slice::Iter<u8>>) -> anyhow::Result<f64> {
     let multiplication_factor = iter
-        .next_if(|&x| x == '+' || x == '-')
-        .map(|ch| if ch == '-' { -1 } else { 1 })
+        .next_if(|&&x| x == b'+' || x == b'-')
+        .map(|&ch| if ch == b'-' { -1 } else { 1 })
         .unwrap_or(1);
 
-    let number = string(iter);
-    let number = number
-        .parse::<i64>()
-        .with_context(|| format!("Invalid number: {}", number))?;
-    Ok(number * multiplication_factor)
-}
-
-fn double(iter: &mut Peekable<std::str::Chars>) -> anyhow::Result<f64> {
-    let multiplication_factor = iter
-        .next_if(|&x| x == '+' || x == '-')
-        .map(|ch| if ch == '-' { -1 } else { 1 })
-        .unwrap_or(1);
-
-    let number = string(iter);
+    let number = string(iter)?;
 
     let number = number
         .parse::<f64>()
@@ -144,35 +123,66 @@ fn double(iter: &mut Peekable<std::str::Chars>) -> anyhow::Result<f64> {
     Ok(number * multiplication_factor as f64)
 }
 
-fn null(iter: &mut Peekable<std::str::Chars>) -> anyhow::Result<()> {
-    let content = string(iter);
-    if !content.is_empty() {
-        bail!("Invalid null: {}", content);
+fn boolean(iter: &mut Peekable<std::slice::Iter<u8>>) -> anyhow::Result<bool> {
+    let content = get_bytes(iter)?.get_u8();
+    match content {
+        b't' => Ok(true),
+        b'f' => Ok(false),
+        _ => bail!("Invalid boolean: {}", content),
+    }
+}
+
+fn string(iter: &mut Peekable<std::slice::Iter<u8>>) -> anyhow::Result<String> {
+    let bytes = get_bytes(iter)?;
+    let string = String::from_utf8(bytes.to_vec()).context("Failed to convert to a string")?;
+
+    Ok(string)
+}
+
+fn integer(iter: &mut Peekable<std::slice::Iter<u8>>) -> anyhow::Result<i64> {
+    let multiplication_factor = iter
+        .next_if(|&&x| x == b'+' || x == b'-')
+        .map(|&ch| if ch == b'-' { -1 } else { 1 })
+        .unwrap_or(1);
+
+    let number = string(iter)?;
+    let number = number
+        .parse::<i64>()
+        .with_context(|| format!("Invalid number: {}", number))?;
+    Ok(number * multiplication_factor)
+}
+
+fn null_bulk_string(iter: &mut Peekable<std::slice::Iter<u8>>) -> anyhow::Result<()> {
+    let length = integer(iter)?;
+    if length != -1 {
+        bail!("Invalid length for null bulk string: {}", length);
     }
     Ok(())
 }
 
-fn string(iter: &mut Peekable<std::str::Chars>) -> String {
-    let mut result = String::new();
+fn get_bytes(iter: &mut Peekable<std::slice::Iter<u8>>) -> anyhow::Result<Bytes> {
+    let mut result = BytesMut::new();
 
     while let Some(ch) = iter.next() {
         match ch {
-            '\r' if matches!(iter.peek(), Some('\n')) => {
+            b'\r' if matches!(iter.peek(), Some(&b'\n')) => {
                 let _dash_n = iter.next();
-                break;
+                return Ok(result.freeze());
             }
             ch => {
-                result.push(ch);
+                result.put_u8(*ch);
             }
         }
     }
-    result
+
+    bail!("Incomplete content")
 }
 
 #[cfg(test)]
 mod tests {
 
     use crate::frame::Frame;
+    use bytes::BytesMut;
     use rstest::rstest;
 
     #[rstest]
@@ -180,10 +190,7 @@ mod tests {
     #[case("-Error message\r\n", Frame::Error("Error message".into()))]
     #[case(":1000\r\n", Frame::Integer(1000))]
     #[case(":-1000\r\n", Frame::Integer(-1000))]
-    #[case("$6\r\nfoobar\r\n", Frame::BulkString {
-        content: "foobar".to_string(),
-        length: 6
-    })]
+    #[case("$6\r\nfoobar\r\n", Frame::BulkString(bytes::Bytes::from("foobar".as_bytes())))]
     #[case("$-1\r\n", Frame::NullBulkString)]
     #[case("#t\r\n", Frame::Boolean(true))]
     #[case("#f\r\n", Frame::Boolean(false))]
@@ -197,7 +204,13 @@ mod tests {
     ]))]
     #[case("_\r\n", Frame::Null)]
     fn test_content(#[case] input: &'static str, #[case] expected: crate::frame::Frame) {
-        let result = Frame::deserialize(input.to_owned()).unwrap();
+        let input = BytesMut::from(input.as_bytes());
+        let result = Frame::deserialize(&input)
+            .map_err(|err| {
+                println!("Error deserializing: {:?}", input);
+                err
+            })
+            .unwrap();
         assert_eq!(result, expected);
     }
 }

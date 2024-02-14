@@ -55,11 +55,12 @@ impl Connection {
                 self.stream.write_all(content.as_bytes()).await?;
                 self.stream.write_all(b"\r\n").await?;
             }
-            Frame::BulkString { content, length } => {
+            Frame::BulkString(bytes) => {
+                let length = bytes.len();
                 self.stream.write_u8(b'$').await?;
                 self.stream.write_all(length.to_string().as_bytes()).await?;
                 self.stream.write_all(b"\r\n").await?;
-                self.stream.write_all(content.as_bytes()).await?;
+                self.stream.write_all(&bytes).await?;
                 self.stream.write_all(b"\r\n").await?;
             }
             Frame::Boolean(bool) => {

@@ -8,9 +8,9 @@ pub struct Ping {
 }
 
 impl Ping {
-    pub fn parse(parser: &mut ParseFrames) -> Self {
-        let optional_message = parser.next_string();
-        Self { optional_message }
+    pub fn parse(parser: &mut ParseFrames) -> anyhow::Result<Self> {
+        let optional_message = parser.next_string()?;
+        Ok(Self { optional_message })
     }
 
     pub async fn execute(self, conn: &mut Connection) -> io::Result<()> {

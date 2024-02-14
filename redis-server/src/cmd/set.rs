@@ -13,13 +13,11 @@ pub struct Set {
 impl Set {
     pub fn parse(parser: &mut ParseFrames) -> anyhow::Result<Self> {
         let key = parser
-            .next_string()
+            .next_string()?
             .ok_or_else(|| anyhow!("Expected a string for key but found None"))?;
         let value = parser
-            .next_string()
-            .ok_or_else(|| anyhow!("Expected a string for value but found None"))?
-            .into_bytes()
-            .into();
+            .next_bytes()
+            .ok_or_else(|| anyhow!("Expected a string for value but found None"))?;
         Ok(Self { key, value })
     }
 

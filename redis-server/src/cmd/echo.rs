@@ -1,17 +1,19 @@
 use std::io;
 
+use bytes::Bytes;
+
 use super::ParseFrames;
 use crate::frame::Frame;
 use crate::{cmd::anyhow, connection::Connection};
 
 pub struct Echo {
-    message: String,
+    message: Bytes,
 }
 
 impl Echo {
     pub fn parse(parser: &mut ParseFrames) -> anyhow::Result<Self> {
         let message = parser
-            .next_string()
+            .next_bytes()
             .ok_or_else(|| anyhow!("Expected a string to echo but found None"))?;
         Ok(Self { message })
     }

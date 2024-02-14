@@ -21,11 +21,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             loop {
                 let bytes = connection.read_bytes().await.unwrap();
                 if let Some(bytes) = bytes {
-                    let content = bytes.to_vec();
-                    let content = String::from_utf8_lossy(&content).to_string();
-
-                    let frame = Frame::deserialize(content.clone())
-                        .context(format!("Failed to deserialize {content:?}"));
+                    let frame = Frame::deserialize(&bytes)
+                        .context(format!("Failed to deserialize {bytes:?}"));
 
                     let frame = match frame {
                         Ok(frame) => frame,
