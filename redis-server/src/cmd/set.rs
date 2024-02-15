@@ -21,9 +21,9 @@ impl Set {
         Ok(Self { key, value })
     }
 
-    pub async fn execute(self, conn: &mut Connection, db: &Db) -> io::Result<()> {
+    pub fn execute(self, conn: &mut Connection, db: &Db) -> io::Result<()> {
         db.set(self.key, self.value);
         let frame = Frame::SimpleString("OK".to_owned());
-        conn.write_frame(frame).await
+        conn.write_frame(frame)
     }
 }

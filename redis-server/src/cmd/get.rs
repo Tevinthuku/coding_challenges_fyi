@@ -14,13 +14,13 @@ impl Get {
         Ok(Self { key })
     }
 
-    pub async fn execute(self, conn: &mut Connection, db: &Db) -> io::Result<()> {
+    pub fn execute(self, conn: &mut Connection, db: &Db) -> io::Result<()> {
         if let Some(value) = db.get(&self.key) {
             let frame = Frame::BulkString(value);
-            conn.write_frame(frame).await
+            conn.write_frame(frame)
         } else {
             let frame = Frame::Null;
-            conn.write_frame(frame).await
+            conn.write_frame(frame)
         }
     }
 }

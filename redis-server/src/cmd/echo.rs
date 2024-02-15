@@ -18,9 +18,9 @@ impl Echo {
         Ok(Self { message })
     }
 
-    pub async fn execute(self, conn: &mut Connection) -> io::Result<()> {
+    pub fn execute(self, conn: &mut Connection) -> io::Result<()> {
         let frame = Frame::new_bulk_string(self.message);
 
-        conn.write_frame(frame).await
+        conn.write_frame(frame)
     }
 }

@@ -13,12 +13,12 @@ impl Ping {
         Ok(Self { optional_message })
     }
 
-    pub async fn execute(self, conn: &mut Connection) -> io::Result<()> {
+    pub fn execute(self, conn: &mut Connection) -> io::Result<()> {
         let frame = if let Some(message) = self.optional_message {
             Frame::SimpleString(message)
         } else {
             Frame::SimpleString("PONG".to_string())
         };
-        conn.write_frame(frame).await
+        conn.write_frame(frame)
     }
 }

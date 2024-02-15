@@ -51,15 +51,15 @@ impl Command {
         }
     }
 
-    pub async fn execute(self, conn: &mut Connection, db: &Db) -> io::Result<()> {
+    pub fn execute(self, conn: &mut Connection, db: &Db) -> io::Result<()> {
         match self {
-            Command::Ping(ping) => ping.execute(conn).await,
-            Command::Echo(echo) => echo.execute(conn).await,
-            Command::Set(set) => set.execute(conn, db).await,
-            Command::Get(get) => get.execute(conn, db).await,
+            Command::Ping(ping) => ping.execute(conn),
+            Command::Echo(echo) => echo.execute(conn),
+            Command::Set(set) => set.execute(conn, db),
+            Command::Get(get) => get.execute(conn, db),
             Command::Unknown => {
                 let frame = Frame::Error("ERR unknown command".to_string());
-                conn.write_frame(frame).await
+                conn.write_frame(frame)
             }
         }
     }
