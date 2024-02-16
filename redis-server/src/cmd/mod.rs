@@ -1,4 +1,5 @@
 mod echo;
+pub mod exists;
 pub mod get;
 mod ping;
 pub mod set;
@@ -13,13 +14,14 @@ use anyhow::{anyhow, bail, Context};
 
 use crate::{connection::Connection, db::Db, frame::Frame};
 
-use self::{echo::Echo, get::Get, set::Set};
+use self::{echo::Echo, exists::Exists, get::Get, set::Set};
 
 pub enum Command {
     Ping(Ping),
     Echo(Echo),
     Set(Set),
     Get(Get),
+    Exists(Exists),
     Unknown,
 }
 
@@ -44,6 +46,7 @@ impl Command {
             "echo" => Ok(Command::Echo(Echo::parse(&mut parser)?)),
             "set" => Ok(Command::Set(Set::parse(&mut parser)?)),
             "get" => Ok(Command::Get(Get::parse(&mut parser)?)),
+            "exists" => Ok(Command::Exists(Exists::parse(&mut parser)?)),
             command => {
                 warn!("command: {command}");
                 Ok(Command::Unknown)
@@ -57,6 +60,7 @@ impl Command {
             Command::Echo(echo) => echo.execute(conn),
             Command::Set(set) => set.execute(conn, db),
             Command::Get(get) => get.execute(conn, db),
+            Command::Exists(exists) => exists.execute(conn, db),
             Command::Unknown => {
                 let frame = Frame::Error("ERR unknown command".to_string());
                 conn.write_frame(frame)

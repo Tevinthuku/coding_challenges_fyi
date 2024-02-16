@@ -29,11 +29,10 @@ impl Db {
         Default::default()
     }
 
-    pub fn set(&self, key: String, value: Bytes) {
-        self.data.lock().unwrap().inner.insert(key, value);
-    }
-
-    pub fn get(&self, key: &str) -> Option<Bytes> {
-        self.data.lock().unwrap().inner.get(key).cloned()
+    pub fn with_data<T, F>(&self, f: F) -> T
+    where
+        F: FnOnce(&mut HashMap<String, Bytes>) -> T,
+    {
+        f(&mut self.data.lock().unwrap().inner)
     }
 }

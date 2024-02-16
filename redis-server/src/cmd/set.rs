@@ -22,7 +22,9 @@ impl Set {
     }
 
     pub fn execute(self, conn: &mut Connection, db: &Db) -> io::Result<()> {
-        db.set(self.key, self.value);
+        db.with_data(|data| {
+            data.insert(self.key, self.value);
+        });
         let frame = Frame::SimpleString("OK".to_owned());
         conn.write_frame(frame)
     }

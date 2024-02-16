@@ -15,12 +15,11 @@ impl Get {
     }
 
     pub fn execute(self, conn: &mut Connection, db: &Db) -> io::Result<()> {
-        if let Some(value) = db.get(&self.key) {
-            let frame = Frame::BulkString(value);
-            conn.write_frame(frame)
-        } else {
-            let frame = Frame::Null;
-            conn.write_frame(frame)
-        }
+        let frame = db.with_data(|data| {
+            data.get(&self.key)
+                .map(|value| Frame::BulkString(value.clone()))
+                .unwrap_or(Frame::Null)
+        });
+        conn.write_frame(frame)
     }
 }
