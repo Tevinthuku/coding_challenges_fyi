@@ -89,10 +89,6 @@ impl Connection {
                 let mut response = BytesMut::new();
                 response.put_u8(b',');
                 self.stream.write_all(&[b','])?;
-
-                if val < 0.0 {
-                    response.put_u8(b'-');
-                }
                 response.extend(val.to_string().as_bytes());
                 response.put_u8(b'\r');
                 response.put_u8(b'\n');
