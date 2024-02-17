@@ -13,7 +13,7 @@ pub struct Echo {
 impl Echo {
     pub fn parse(parser: &mut ParseFrames) -> anyhow::Result<Self> {
         let message = parser
-            .next_bytes()
+            .next_bytes()?
             .ok_or_else(|| anyhow!("Expected a string to echo but found None"))?;
         Ok(Self { message })
     }

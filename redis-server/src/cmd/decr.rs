@@ -5,7 +5,6 @@ use crate::{connection::Connection, db::Db, frame::Frame};
 use super::ParseFrames;
 
 use anyhow::anyhow;
-use bytes::Bytes;
 pub struct Decr {
     key: String,
 }
@@ -19,11 +18,7 @@ impl Decr {
     }
 
     pub fn execute(self, conn: &mut Connection, db: &Db) -> io::Result<()> {
-        let new_value = db.with_integer(self.key.clone(), |val, data| {
-            let new_val = val - 1;
-            data.insert(self.key, Bytes::from(format!("{}", new_val)));
-            new_val
-        })?;
+        let new_value = db.with_integer_data_mut(self.key.clone(), |val| val - 1)?;
 
         conn.write_frame(Frame::Integer(new_value))
     }

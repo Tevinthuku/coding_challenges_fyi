@@ -4,7 +4,9 @@ mod echo;
 pub mod exists;
 pub mod get;
 pub mod incr;
+pub mod lpush;
 mod ping;
+pub mod rpush;
 pub mod set;
 
 use std::io;
@@ -17,7 +19,10 @@ use anyhow::{anyhow, bail, Context};
 
 use crate::{connection::Connection, db::Db, frame::Frame};
 
-use self::{decr::Decr, del::Del, echo::Echo, exists::Exists, get::Get, incr::Incr, set::Set};
+use self::{
+    decr::Decr, del::Del, echo::Echo, exists::Exists, get::Get, incr::Incr, lpush::Lpush,
+    rpush::Rpush, set::Set,
+};
 
 pub enum Command {
     Ping(Ping),
@@ -28,6 +33,8 @@ pub enum Command {
     Del(Del),
     Incr(Incr),
     Decr(Decr),
+    Lpush(Lpush),
+    Rpush(Rpush),
     Unknown,
 }
 
@@ -56,6 +63,8 @@ impl Command {
             "del" => Ok(Command::Del(Del::parse(&mut parser)?)),
             "incr" => Ok(Command::Incr(Incr::parse(&mut parser)?)),
             "decr" => Ok(Command::Decr(Decr::parse(&mut parser)?)),
+            "lpush" => Ok(Command::Lpush(Lpush::parse(&mut parser)?)),
+            "rpush" => Ok(Command::Rpush(Rpush::parse(&mut parser)?)),
             command => {
                 warn!("command: {command}");
                 Ok(Command::Unknown)
@@ -73,6 +82,8 @@ impl Command {
             Command::Del(del) => del.execute(conn, db),
             Command::Incr(incr) => incr.execute(conn, db),
             Command::Decr(decr) => decr.execute(conn, db),
+            Command::Lpush(lpush) => lpush.execute(conn, db),
+            Command::Rpush(rpush) => rpush.execute(conn, db),
             Command::Unknown => {
                 let frame = Frame::Error("ERR unknown command".to_string());
                 conn.write_frame(frame)
@@ -105,11 +116,14 @@ impl ParseFrames {
         }
     }
 
-    fn next_bytes(&mut self) -> Option<Bytes> {
+    fn next_bytes(&mut self) -> anyhow::Result<Option<Bytes>> {
         match self.items.next() {
-            Some(Frame::SimpleString(s)) => Some(s.into()),
-            Some(Frame::BulkString(bytes)) => Some(bytes),
-            _ => None,
+            Some(Frame::SimpleString(s)) => Ok(Some(s.into())),
+            Some(Frame::BulkString(bytes)) => Ok(Some(bytes)),
+            None => Ok(None),
+            _ => {
+                bail!("Expected to find bytes but did not find any")
+            }
         }
     }
 }

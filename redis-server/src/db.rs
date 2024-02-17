@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use std::{
     collections::HashMap,
-    io,
+    io::{self},
     sync::{Arc, Mutex},
 };
 
@@ -37,9 +37,10 @@ impl Db {
         f(&mut self.data.lock().unwrap().inner)
     }
 
-    pub fn with_integer<F>(&self, key: String, f: F) -> io::Result<i64>
+    /// The integer result from the closure is the new value for the key
+    pub fn with_integer_data_mut<F>(&self, key: String, f: F) -> io::Result<i64>
     where
-        F: FnOnce(i64, &mut HashMap<String, Bytes>) -> i64,
+        F: FnOnce(i64) -> i64,
     {
         self.with_data(|data| {
             let entry = data.entry(key.clone());
@@ -49,7 +50,7 @@ impl Db {
                     let value = String::from_utf8(value.to_vec())
                         .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
                     match value.parse::<i64>() {
-                        Ok(value) => f(value, data),
+                        Ok(value) => f(value),
                         Err(_) => {
                             return Err(io::Error::new(
                                 io::ErrorKind::Other,
@@ -58,10 +59,39 @@ impl Db {
                         }
                     }
                 }
-                std::collections::hash_map::Entry::Vacant(_) => f(0, data),
+                std::collections::hash_map::Entry::Vacant(_) => f(0),
             };
 
+            data.insert(key, Bytes::from(format!("{}", new_val)));
+
             Ok(new_val)
+        })
+    }
+
+    /// The result from the closure is the new value for the key
+    pub fn with_list_data_mut<F>(&self, key: String, f: F) -> io::Result<Vec<Bytes>>
+    where
+        F: FnOnce(Vec<Bytes>) -> Vec<Bytes>,
+    {
+        self.with_data(|data| {
+            let entry = data.entry(key.clone());
+            let new_value = match entry {
+                std::collections::hash_map::Entry::Occupied(val) => {
+                    let existing_value = val.into_mut();
+
+                    let content: Vec<Bytes> = serde_json::from_slice(existing_value)
+                        .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
+
+                    f(content)
+                }
+                std::collections::hash_map::Entry::Vacant(_) => f(vec![]),
+            };
+
+            let result = serde_json::to_string(&new_value)
+                .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
+            let result = Bytes::from(result);
+            data.insert(key, result);
+            Ok(new_value)
         })
     }
 }

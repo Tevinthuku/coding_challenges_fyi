@@ -16,7 +16,7 @@ impl Set {
             .next_string()?
             .ok_or_else(|| anyhow!("Expected a string for key but found None"))?;
         let value = parser
-            .next_bytes()
+            .next_bytes()?
             .ok_or_else(|| anyhow!("Expected a string for value but found None"))?;
         Ok(Self { key, value })
     }
