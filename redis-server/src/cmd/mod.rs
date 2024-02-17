@@ -1,3 +1,4 @@
+pub mod decr;
 pub mod del;
 mod echo;
 pub mod exists;
@@ -16,7 +17,7 @@ use anyhow::{anyhow, bail, Context};
 
 use crate::{connection::Connection, db::Db, frame::Frame};
 
-use self::{del::Del, echo::Echo, exists::Exists, get::Get, incr::Incr, set::Set};
+use self::{decr::Decr, del::Del, echo::Echo, exists::Exists, get::Get, incr::Incr, set::Set};
 
 pub enum Command {
     Ping(Ping),
@@ -26,6 +27,7 @@ pub enum Command {
     Exists(Exists),
     Del(Del),
     Incr(Incr),
+    Decr(Decr),
     Unknown,
 }
 
@@ -53,6 +55,7 @@ impl Command {
             "exists" => Ok(Command::Exists(Exists::parse(&mut parser)?)),
             "del" => Ok(Command::Del(Del::parse(&mut parser)?)),
             "incr" => Ok(Command::Incr(Incr::parse(&mut parser)?)),
+            "decr" => Ok(Command::Decr(Decr::parse(&mut parser)?)),
             command => {
                 warn!("command: {command}");
                 Ok(Command::Unknown)
@@ -69,6 +72,7 @@ impl Command {
             Command::Exists(exists) => exists.execute(conn, db),
             Command::Del(del) => del.execute(conn, db),
             Command::Incr(incr) => incr.execute(conn, db),
+            Command::Decr(decr) => decr.execute(conn, db),
             Command::Unknown => {
                 let frame = Frame::Error("ERR unknown command".to_string());
                 conn.write_frame(frame)
