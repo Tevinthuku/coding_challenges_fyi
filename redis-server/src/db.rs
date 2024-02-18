@@ -47,17 +47,12 @@ impl Db {
             let new_val = match entry {
                 std::collections::hash_map::Entry::Occupied(mut val) => {
                     let value = val.get_mut();
-                    let value = String::from_utf8(value.to_vec())
-                        .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
-                    match value.parse::<i64>() {
-                        Ok(value) => f(value),
-                        Err(_) => {
-                            return Err(io::Error::new(
-                                io::ErrorKind::Other,
-                                "Value is not an integer",
-                            ))
-                        }
-                    }
+
+                    let value: i64 = serde_json::from_slice(value).map_err(|_| {
+                        io::Error::new(io::ErrorKind::Other, "Value is not an integer")
+                    })?;
+
+                    f(value)
                 }
                 std::collections::hash_map::Entry::Vacant(_) => f(0),
             };
