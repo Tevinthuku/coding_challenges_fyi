@@ -117,7 +117,8 @@ impl Db {
         })
     }
 
-    pub fn set(&self, key: String, value: Bytes, expire: Option<Duration>) {
+    /// returns the previous value for the key if it existed.
+    pub fn set(&self, key: String, value: Bytes, expire: Option<Duration>) -> Option<Bytes> {
         let mut state = self.inner.data.lock().unwrap();
 
         let mut notify = false;
@@ -135,9 +136,9 @@ impl Db {
             when
         });
 
-        let prev = state.inner.insert(key.clone(), value);
+        let previous_value = state.inner.insert(key.clone(), value);
 
-        if let Some(_prev) = prev {
+        if let Some(_previous_value) = &previous_value {
             if let Some(expires_at) = expires_at {
                 state.expiry.remove(&(expires_at, key.clone()));
             }
@@ -155,7 +156,7 @@ impl Db {
             self.inner.background_task.notify_one();
         }
 
-        todo!()
+        previous_value
     }
 }
 
