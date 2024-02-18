@@ -1,4 +1,7 @@
-use std::{io, time::Duration};
+use std::{
+    io,
+    time::{Duration, SystemTime},
+};
 
 use anyhow::Context;
 use bytes::Bytes;
@@ -52,7 +55,7 @@ impl Set {
         while let Some(option) = parser.next_string()? {
             let option = option.to_lowercase();
             match option.as_str() {
-                "ex" | "px" => {
+                "ex" | "px" | "exat" | "pxat" => {
                     let duration = parser
                         .next_bytes()?
                         .ok_or_else(|| anyhow!("Expected a value for duration but found None"))?;
@@ -65,6 +68,31 @@ impl Set {
                         }
                         "ex" => {
                             options.expiration = Some(Duration::from_secs(duration));
+                        }
+                        "exat" => {
+                            let now_in_secs = SystemTime::now()
+                                .duration_since(SystemTime::UNIX_EPOCH)
+                                .context("Failed to get the current time")?
+                                .as_secs();
+                            if duration > now_in_secs {
+                                options.expiration =
+                                    Some(Duration::from_secs(duration - now_in_secs));
+                            } else {
+                                return Err(anyhow!("The expiration time must be in the future"));
+                            }
+                        }
+                        "pxat" => {
+                            let duration = duration as u128;
+                            let now_in_millis = SystemTime::now()
+                                .duration_since(SystemTime::UNIX_EPOCH)
+                                .context("Failed to get the current time")?
+                                .as_millis();
+                            if duration > now_in_millis {
+                                options.expiration =
+                                    Some(Duration::from_millis((duration - now_in_millis) as u64));
+                            } else {
+                                return Err(anyhow!("The expiration time must be in the future"));
+                            }
                         }
                         _ => {}
                     }
