@@ -166,7 +166,7 @@ impl DbInner {
     }
 
     /// Signals the purge background task to shut down. This is called by the
-    /// `DbShutdown`s `Drop` implementation.
+    /// `Db`s `Drop` implementation.
     fn shutdown_purge_task(&self) {
         // The background task must be signaled to shut down. This is done by
         // setting `Data::shutdown` to `true` and signalling the task.
@@ -219,4 +219,27 @@ async fn purge_expired_tasks(shared: Arc<DbInner>) {
     }
 
     debug!("Background task is shutting down");
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use bytes::Bytes;
+
+    #[tokio::test]
+    async fn test_key_expiry() {
+        let db = super::Db::new();
+        let value = Bytes::from("value");
+        db.set(
+            "key".to_owned(),
+            value.clone(),
+            Some(Duration::from_secs(1)),
+        );
+        let result = db.with_data(|data| data.get("key").cloned()).unwrap();
+        assert_eq!(result, value);
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let result = db.with_data(|data| data.get("key").cloned());
+        assert_eq!(result, None);
+    }
 }
