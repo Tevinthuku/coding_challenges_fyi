@@ -12,7 +12,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
     let listener = TcpListener::bind("127.0.0.1:6379")?;
-    let db = Arc::new(Db::new());
+    let db = Arc::new(Db::new()?);
 
     for stream in listener.incoming() {
         let stream = stream?;

@@ -1,10 +1,13 @@
 use bytes::Bytes;
+use chrono::{DateTime, Utc};
 use log::debug;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeSet, HashMap},
+    hash::Hash,
     io,
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 use tokio::sync::Notify;
 
@@ -29,6 +32,10 @@ struct DbInner {
 struct Data {
     inner: HashMap<String, Bytes>,
     expiry: BTreeSet<(Instant, String)>,
+    // Since Instant is an opaque type, we cannot serialize it directly and save it to disk
+    // this is why we maintain a separate hashMap to store the expiry time in DateTime<Utc> format.
+    // When loading the stored data from disk, we can convert the DateTime<Utc> to an Instant.
+    _expiry_serializable: HashMap<String, DateTime<Utc>>,
     shutdown: bool,
 }
 
@@ -38,6 +45,7 @@ impl Default for Db {
             data: Mutex::new(Data {
                 inner: HashMap::new(),
                 expiry: BTreeSet::new(),
+                _expiry_serializable: HashMap::new(),
                 shutdown: false,
             }),
             background_task: Notify::new(),
@@ -49,8 +57,27 @@ impl Default for Db {
 }
 
 impl Db {
-    pub fn new() -> Self {
-        Default::default()
+    pub fn new() -> io::Result<Self> {
+        SerializableState::restore_db_from_file()
+    }
+
+    fn new_with_data(
+        data: HashMap<String, Bytes>,
+        expiry: BTreeSet<(Instant, String)>,
+        _expiry_serializable: HashMap<String, DateTime<Utc>>,
+    ) -> Self {
+        let db_inner = DbInner {
+            data: Mutex::new(Data {
+                inner: data,
+                expiry,
+                _expiry_serializable,
+                shutdown: false,
+            }),
+            background_task: Notify::new(),
+        };
+        let inner = Arc::new(db_inner);
+        tokio::spawn(purge_expired_tasks(inner.clone()));
+        Self { inner }
     }
 
     pub fn with_data<T, F>(&self, f: F) -> T
@@ -119,9 +146,10 @@ impl Db {
 
         let mut notify = false;
 
-        let expires_at = expire.map(|duration| {
+        let expiry = expire.map(|duration| {
             let when = Instant::now() + duration;
-
+            let system_time = SystemTime::now() + duration;
+            let utc_time = DateTime::<Utc>::from(system_time);
             notify = state
                 .expiry
                 .iter()
@@ -129,19 +157,23 @@ impl Db {
                 .map(|(current, _)| *current > when)
                 .unwrap_or(true);
 
-            when
+            (when, utc_time)
         });
 
         let previous_value = state.inner.insert(key.clone(), value);
 
         if let Some(_previous_value) = &previous_value {
-            if let Some(expires_at) = expires_at {
+            if let Some(expires_at) = expiry.map(|data| data.0) {
                 state.expiry.remove(&(expires_at, key.clone()));
             }
         }
 
-        if let Some(when) = expires_at {
-            state.expiry.insert((when, key));
+        if let Some(when) = expiry.map(|data| data.0) {
+            state.expiry.insert((when, key.clone()));
+        }
+
+        if let Some(date) = expiry.map(|data| data.1) {
+            state._expiry_serializable.insert(key, date);
         }
 
         drop(state);
@@ -204,6 +236,68 @@ async fn purge_expired_tasks(shared: Arc<DbInner>) {
     debug!("Background task is shutting down");
 }
 
+#[derive(Serialize, Deserialize)]
+struct SerializableState {
+    inner: HashMap<String, Bytes>,
+    expiry: HashMap<String, DateTime<Utc>>,
+}
+
+const FILE: &str = "db.json";
+
+impl SerializableState {
+    fn save_to_file(db: &Db) -> io::Result<()> {
+        let data = db.inner.data.lock().unwrap();
+        let expiry = data
+            ._expiry_serializable
+            .iter()
+            .map(|(key, date)| (key.clone(), *date))
+            .collect();
+        let content = Self {
+            inner: data.inner.clone(),
+            expiry,
+        };
+
+        serde_json::to_writer(std::fs::File::create(FILE)?, &content)?;
+
+        Ok(())
+    }
+
+    fn restore_db_from_file() -> io::Result<Db> {
+        let file = std::fs::File::open(FILE);
+        if let Err(err) = file {
+            if err.kind() == io::ErrorKind::NotFound {
+                return Ok(Db::default());
+            }
+            return Err(err);
+        }
+        let reader = std::io::BufReader::new(file?);
+        let content: SerializableState = serde_json::from_reader(reader)?;
+        let (expiry, date_time) = convert_expiry_to_instant(content.expiry);
+        Ok(Db::new_with_data(content.inner, expiry, date_time))
+    }
+}
+
+// TODO: Create another dedicated function to return valid date times.
+fn convert_expiry_to_instant(
+    expiry: HashMap<String, DateTime<Utc>>,
+) -> (BTreeSet<(Instant, String)>, HashMap<String, DateTime<Utc>>) {
+    let mut expiry_set = BTreeSet::new();
+    let mut valid_inner_expiry = HashMap::new();
+    let sys_time_now = SystemTime::now();
+    let instant_now = Instant::now();
+    for (key, date) in expiry {
+        let sys_date: SystemTime = date.into();
+        // this will only return an error if sys_time_now is later than date. (if the date has already passed)
+        let duration = sys_date.duration_since(sys_time_now);
+        if let Ok(duration) = duration {
+            let when = instant_now + duration;
+            expiry_set.insert((when, key.clone()));
+            valid_inner_expiry.insert(key, date);
+        }
+    }
+    (expiry_set, valid_inner_expiry)
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -212,7 +306,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_key_expiry() {
-        let db = super::Db::new();
+        let db = super::Db::new().unwrap();
         let value = Bytes::from("value");
         db.set(
             "key".to_owned(),
