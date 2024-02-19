@@ -1406,6 +1406,7 @@ dependencies = [
  "env_logger",
  "log",
  "rstest",
+ "serde",
  "serde_json",
  "tokio",
  "tracing",

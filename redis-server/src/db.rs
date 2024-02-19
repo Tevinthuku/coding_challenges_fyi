@@ -28,11 +28,7 @@ struct DbInner {
 #[derive(Debug)]
 struct Data {
     inner: HashMap<String, Bytes>,
-    /// A set of keys that have an expiry time
     expiry: BTreeSet<(Instant, String)>,
-    /// True when the Db instance is shutting down. This happens when all `Db`
-    /// values drop. Setting this to `true` signals to the background task to
-    /// exit.
     shutdown: bool,
 }
 
@@ -151,8 +147,6 @@ impl Db {
         drop(state);
 
         if notify {
-            // Finally, only notify the background task if it needs to update
-            // its state to reflect a new expiration.
             self.inner.background_task.notify_one();
         }
 
@@ -168,14 +162,8 @@ impl DbInner {
     /// Signals the purge background task to shut down. This is called by the
     /// `Db`s `Drop` implementation.
     fn shutdown_purge_task(&self) {
-        // The background task must be signaled to shut down. This is done by
-        // setting `Data::shutdown` to `true` and signalling the task.
         let mut state = self.data.lock().unwrap();
         state.shutdown = true;
-
-        // Drop the lock before signalling the background task. This helps
-        // reduce lock contention by ensuring the background task doesn't
-        // wake up only to be unable to acquire the mutex.
         drop(state);
 
         self.background_task.notify_one();
@@ -184,16 +172,12 @@ impl DbInner {
     fn purge_expired_keys(&self) -> Option<Instant> {
         let mut data = self.data.lock().unwrap();
         if data.shutdown {
-            // The database is shutting down. All handles to the shared state
-            // have dropped. The background task should exit.
             return None;
         }
         let now = Instant::now();
 
         while let Some((when, key)) = data.expiry.iter().next().cloned() {
             if when > now {
-                // Done purging, `when` is the instant at which the next key
-                // expires. The worker task will wait until this instant.
                 return Some(when);
             }
 
@@ -213,7 +197,6 @@ async fn purge_expired_tasks(shared: Arc<DbInner>) {
                 _ = shared.background_task.notified() => {}
             }
         } else {
-            // There are no keys to expire, so we wait until we are notified
             shared.background_task.notified().await;
         }
     }
