@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args = Arguments::new()?;
     let reader = BufReader::new(File::open(args.file_name)?);
 
-    let lines = reader.lines().flatten();
+    let lines = reader.lines().map_while(Result::ok);
 
     let content = if args.unique {
         lines.unique().collect_vec()

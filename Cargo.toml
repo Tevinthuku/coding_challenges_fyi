@@ -1,7 +1,7 @@
 [workspace]
 
 members = [
-    "ccwc", "cut", "huffman-compression", "json-parser", "load-balancer", "sort-tool",
+    "ccwc", "cut", "huffman-compression", "json-parser", "load-balancer", "redis-server", "sort-tool",
 ]
 
 resolver = "2"
