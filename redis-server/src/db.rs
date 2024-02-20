@@ -295,12 +295,11 @@ fn generate_expiry_and_date_time(
 ) -> (Expiry, SerializableExpiry) {
     let mut expiry_set = BTreeSet::new();
     let mut valid_inner_expiry = HashMap::new();
-    let sys_time_now = SystemTime::now();
+    let time_now = SystemTime::now();
     let instant_now = Instant::now();
     for (key, date) in expiry {
-        let sys_date: SystemTime = date.into();
-        // this will only return an error if sys_time_now is later than date. (if the date has already passed)
-        let duration = sys_date.duration_since(sys_time_now);
+        // this will only return an error if the date has already passed
+        let duration = SystemTime::from(date).duration_since(time_now);
         if let Ok(duration) = duration {
             let when = instant_now + duration;
             expiry_set.insert((when, key.clone()));
