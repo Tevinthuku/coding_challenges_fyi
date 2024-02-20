@@ -18,7 +18,7 @@ impl Del {
     }
 
     pub fn execute(self, conn: &mut Connection, db: &Db) -> io::Result<()> {
-        let delete_count = db.with_data(|data| {
+        let delete_count = db.with_data_mut(|data| {
             self.keys.iter().fold(0, |acc, key| {
                 if data.remove(key).is_some() {
                     acc + 1

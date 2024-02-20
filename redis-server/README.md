@@ -20,14 +20,14 @@ They can be seen at the `cmd` directory as well:
 
 ```
 redis-benchmark -t SET,GET -q
-SET: 138504.16 requests per second, p50=0.183 msec
-GET: 145348.83 requests per second, p50=0.175 msec
+SET: 139275.77 requests per second, p50=0.191 msec
+GET: 149925.03 requests per second, p50=0.175 msec
 ```
 
 ```
 redis-benchmark -t set,get, -n 100000 -q
-SET: 145560.41 requests per second, p50=0.183 msec
-GET: 142653.36 requests per second, p50=0.183 msec
+SET: 143061.52 requests per second, p50=0.183 msec
+GET: 150375.94 requests per second, p50=0.175 msec
 ```
 
 ## Actual redis benchmarks

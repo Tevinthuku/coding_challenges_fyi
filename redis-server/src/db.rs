@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeSet, HashMap},
     io,
-    sync::{Arc, Mutex},
+    sync::{Arc, RwLock},
     time::{Duration, Instant, SystemTime},
 };
 use tokio::sync::Notify;
@@ -23,7 +23,7 @@ impl Drop for Db {
 
 #[derive(Debug)]
 struct DbInner {
-    data: Mutex<Data>,
+    data: RwLock<Data>,
     background_task: Notify,
 }
 
@@ -41,7 +41,7 @@ struct Data {
 impl Default for Db {
     fn default() -> Self {
         let db_inner = DbInner {
-            data: Mutex::new(Data {
+            data: RwLock::new(Data {
                 inner: HashMap::new(),
                 expiry: BTreeSet::new(),
                 _expiry_serializable: HashMap::new(),
@@ -60,13 +60,13 @@ impl Db {
         SerializableState::restore_db_from_file()
     }
 
-    fn new_with_data(
+    fn new_with_data_mut(
         data: HashMap<String, Bytes>,
         expiry: BTreeSet<(Instant, String)>,
         _expiry_serializable: HashMap<String, DateTime<Utc>>,
     ) -> Self {
         let db_inner = DbInner {
-            data: Mutex::new(Data {
+            data: RwLock::new(Data {
                 inner: data,
                 expiry,
                 _expiry_serializable,
@@ -79,11 +79,19 @@ impl Db {
         Self { inner }
     }
 
+    /// Useful for read access. Access to data is under a shared access lock.
     pub fn with_data<T, F>(&self, f: F) -> T
+    where
+        F: FnOnce(&HashMap<String, Bytes>) -> T,
+    {
+        f(&self.inner.data.read().unwrap().inner)
+    }
+
+    pub fn with_data_mut<T, F>(&self, f: F) -> T
     where
         F: FnOnce(&mut HashMap<String, Bytes>) -> T,
     {
-        f(&mut self.inner.data.lock().unwrap().inner)
+        f(&mut self.inner.data.write().unwrap().inner)
     }
 
     /// The integer result from the closure is the new value for the key
@@ -91,7 +99,7 @@ impl Db {
     where
         F: FnOnce(i64) -> i64,
     {
-        self.with_data(|data| {
+        self.with_data_mut(|data| {
             let entry = data.entry(key.clone());
             let new_val = match entry {
                 std::collections::hash_map::Entry::Occupied(mut val) => {
@@ -117,7 +125,7 @@ impl Db {
     where
         F: FnOnce(Vec<Bytes>) -> Vec<Bytes>,
     {
-        self.with_data(|data| {
+        self.with_data_mut(|data| {
             let entry = data.entry(key.clone());
             let new_value = match entry {
                 std::collections::hash_map::Entry::Occupied(val) => {
@@ -141,7 +149,7 @@ impl Db {
 
     /// returns the previous value for the key if it existed.
     pub fn set(&self, key: String, value: Bytes, expire: Option<Duration>) -> Option<Bytes> {
-        let mut state = self.inner.data.lock().unwrap();
+        let mut state = self.inner.data.write().unwrap();
 
         let mut notify = false;
 
@@ -191,13 +199,13 @@ impl Db {
 
 impl DbInner {
     fn is_shutdown(&self) -> bool {
-        self.data.lock().unwrap().shutdown
+        self.data.read().unwrap().shutdown
     }
 
     /// Signals the purge background task to shut down. This is called by the
     /// `Db`s `Drop` implementation.
     fn shutdown_purge_task(&self) {
-        let mut state = self.data.lock().unwrap();
+        let mut state = self.data.write().unwrap();
         state.shutdown = true;
         drop(state);
 
@@ -205,7 +213,7 @@ impl DbInner {
     }
 
     fn purge_expired_keys(&self) -> Option<Instant> {
-        let mut data = self.data.lock().unwrap();
+        let mut data = self.data.write().unwrap();
         if data.shutdown {
             return None;
         }
@@ -249,7 +257,7 @@ const FILE: &str = "db.json";
 
 impl SerializableState {
     fn save_to_file(db: &Db) -> io::Result<()> {
-        let data = db.inner.data.lock().unwrap();
+        let data = db.inner.data.read().unwrap();
         let expiry = data
             ._expiry_serializable
             .iter()
@@ -276,7 +284,7 @@ impl SerializableState {
         let reader = std::io::BufReader::new(file?);
         let content: SerializableState = serde_json::from_reader(reader)?;
         let (expiry, date_time) = generate_expiry_and_date_time(content.expiry);
-        Ok(Db::new_with_data(content.inner, expiry, date_time))
+        Ok(Db::new_with_data_mut(content.inner, expiry, date_time))
     }
 }
 
@@ -317,10 +325,10 @@ mod tests {
             value.clone(),
             Some(Duration::from_secs(1)),
         );
-        let result = db.with_data(|data| data.get("key").cloned()).unwrap();
+        let result = db.with_data_mut(|data| data.get("key").cloned()).unwrap();
         assert_eq!(result, value);
         tokio::time::sleep(Duration::from_secs(2)).await;
-        let result = db.with_data(|data| data.get("key").cloned());
+        let result = db.with_data_mut(|data| data.get("key").cloned());
         assert_eq!(result, None);
     }
 }
