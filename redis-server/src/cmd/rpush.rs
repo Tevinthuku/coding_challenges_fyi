@@ -26,11 +26,8 @@ impl Rpush {
     pub fn execute(self, conn: &mut Connection, db: &Db) -> io::Result<()> {
         let list = db.with_list_data_mut(self.key, |list| {
             let mut list = list;
-
-            for value in self.values {
-                list.push(value);
-            }
-            list.into_iter().collect()
+            list.extend(self.values);
+            list
         })?;
         let frame = Frame::Integer(list.len() as i64);
         conn.write_frame(frame)

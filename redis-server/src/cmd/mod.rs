@@ -7,6 +7,7 @@ pub mod incr;
 pub mod lpush;
 mod ping;
 pub mod rpush;
+pub mod save;
 pub mod set;
 
 use std::io;
@@ -21,7 +22,7 @@ use crate::{connection::Connection, db::Db, frame::Frame};
 
 use self::{
     decr::Decr, del::Del, echo::Echo, exists::Exists, get::Get, incr::Incr, lpush::Lpush,
-    rpush::Rpush, set::Set,
+    rpush::Rpush, save::Save, set::Set,
 };
 
 pub enum Command {
@@ -35,6 +36,7 @@ pub enum Command {
     Decr(Decr),
     Lpush(Lpush),
     Rpush(Rpush),
+    Save(Save),
     Unknown,
 }
 
@@ -65,6 +67,7 @@ impl Command {
             "decr" => Ok(Command::Decr(Decr::parse(&mut parser)?)),
             "lpush" => Ok(Command::Lpush(Lpush::parse(&mut parser)?)),
             "rpush" => Ok(Command::Rpush(Rpush::parse(&mut parser)?)),
+            "save" => Ok(Command::Save(Save)),
             command => {
                 warn!("command: {command}");
                 Ok(Command::Unknown)
@@ -84,6 +87,7 @@ impl Command {
             Command::Decr(decr) => decr.execute(conn, db),
             Command::Lpush(lpush) => lpush.execute(conn, db),
             Command::Rpush(rpush) => rpush.execute(conn, db),
+            Command::Save(save) => save.execute(conn, db),
             Command::Unknown => {
                 let frame = Frame::Error("ERR unknown command".to_string());
                 conn.write_frame(frame)

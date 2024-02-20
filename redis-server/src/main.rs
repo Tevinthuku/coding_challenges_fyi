@@ -7,6 +7,8 @@ use std::{
 use anyhow::Context;
 use redis_server::{cmd::Command, db::Db, frame::Frame};
 
+/// Tokio is needed for the background tasks of purging expired keys. More on this can be seen in the `db` module.
+/// Everything else is synchronous.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();

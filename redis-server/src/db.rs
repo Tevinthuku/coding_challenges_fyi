@@ -4,7 +4,6 @@ use log::debug;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeSet, HashMap},
-    hash::Hash,
     io,
     sync::{Arc, Mutex},
     time::{Duration, Instant, SystemTime},
@@ -184,6 +183,10 @@ impl Db {
 
         previous_value
     }
+
+    pub fn save(&self) -> io::Result<()> {
+        SerializableState::save_to_file(self)
+    }
 }
 
 impl DbInner {
@@ -272,15 +275,16 @@ impl SerializableState {
         }
         let reader = std::io::BufReader::new(file?);
         let content: SerializableState = serde_json::from_reader(reader)?;
-        let (expiry, date_time) = convert_expiry_to_instant(content.expiry);
+        let (expiry, date_time) = generate_expiry_and_date_time(content.expiry);
         Ok(Db::new_with_data(content.inner, expiry, date_time))
     }
 }
 
-// TODO: Create another dedicated function to return valid date times.
-fn convert_expiry_to_instant(
+type Expiry = BTreeSet<(Instant, String)>;
+type SerializableExpiry = HashMap<String, DateTime<Utc>>;
+fn generate_expiry_and_date_time(
     expiry: HashMap<String, DateTime<Utc>>,
-) -> (BTreeSet<(Instant, String)>, HashMap<String, DateTime<Utc>>) {
+) -> (Expiry, SerializableExpiry) {
     let mut expiry_set = BTreeSet::new();
     let mut valid_inner_expiry = HashMap::new();
     let sys_time_now = SystemTime::now();
