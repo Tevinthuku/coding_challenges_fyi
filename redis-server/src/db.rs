@@ -153,7 +153,7 @@ impl Db {
 
         let mut notify = false;
 
-        let expiry = expire.map(|duration| {
+        let expiry_data = expire.map(|duration| {
             let when = Instant::now() + duration;
             let system_time = SystemTime::now() + duration;
             let utc_time = DateTime::<Utc>::from(system_time);
@@ -170,16 +170,16 @@ impl Db {
         let previous_value = state.inner.insert(key.clone(), value);
 
         if let Some(_previous_value) = &previous_value {
-            if let Some(expires_at) = expiry.map(|data| data.0) {
+            if let Some(expires_at) = expiry_data.map(|data| data.0) {
                 state.expiry.remove(&(expires_at, key.clone()));
             }
         }
 
-        if let Some(when) = expiry.map(|data| data.0) {
+        if let Some(when) = expiry_data.map(|data| data.0) {
             state.expiry.insert((when, key.clone()));
         }
 
-        if let Some(date) = expiry.map(|data| data.1) {
+        if let Some(date) = expiry_data.map(|data| data.1) {
             state._expiry_serializable.insert(key, date);
         }
 
@@ -225,6 +225,7 @@ impl DbInner {
             }
 
             data.inner.remove(&key);
+            data._expiry_serializable.remove(&key);
             data.expiry.remove(&(when, key));
         }
 
