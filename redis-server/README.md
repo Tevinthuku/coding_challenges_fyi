@@ -6,9 +6,16 @@ https://codingchallenges.fyi/challenges/challenge-redis
 
 ### Running the server
 
+### Build (at the root)
+
 ```
-cd redis-server
-RUST_LOG=info cargo run
+cargo build --release --bin redis-server
+```
+
+### Run the server
+
+```
+./target/release/redis-server
 ```
 
 ### Passing commands from the cli-client
@@ -43,8 +50,8 @@ Implementation details can be seen at the `cmd` directory:
 
 ```
 redis-benchmark -t set,get, -n 100000 -q
-SET: 137741.05 requests per second, p50=0.183 msec
-GET: 149476.83 requests per second, p50=0.175 msec
+SET: 139470.02 requests per second, p50=0.191 msec
+GET: 148367.95 requests per second, p50=0.183 msec
 ```
 
 ## For comparison: These are the numbers I got when I used a Mutex:
