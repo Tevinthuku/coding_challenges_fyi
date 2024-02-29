@@ -2173,6 +2173,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "web_server"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+]
+
+[[package]]
 name = "windows-core"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
