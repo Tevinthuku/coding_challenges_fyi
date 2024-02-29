@@ -1,10 +1,10 @@
 use std::{
     net::{TcpListener, TcpStream},
     sync::Arc,
-    thread,
 };
 
 use anyhow::Context;
+use crossbeam::channel::{bounded, Receiver};
 use redis_server::{cmd::Command, db::Db, frame::Frame};
 
 /// Tokio is needed for the background tasks of purging expired keys. More on this can be seen in the `db` module.
@@ -14,14 +14,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
     let listener = TcpListener::bind("127.0.0.1:6379")?;
+    let (sender, receiver) = bounded::<TcpStream>(200000);
     let db = Arc::new(Db::new()?);
+
+    let mut threads = Vec::with_capacity(100);
+
+    for _ in 0..threads.capacity() {
+        let receiver = receiver.clone();
+        let db = db.clone();
+        let thread = std::thread::spawn(move || {
+            stream_receiver(receiver, db);
+        });
+        threads.push(thread);
+    }
 
     for stream in listener.incoming() {
         let stream = stream?;
-        let db = db.clone();
-        thread::spawn(move || handle_stream(stream, db));
+        sender.send(stream).unwrap();
+    }
+
+    for thread in threads {
+        thread.join().unwrap();
     }
     Ok(())
+}
+
+fn stream_receiver(receiver: Receiver<TcpStream>, db: Arc<Db>) {
+    for stream in receiver {
+        let db = db.clone();
+        handle_stream(stream, db)
+    }
 }
 
 fn handle_stream(stream: TcpStream, db: Arc<Db>) {
