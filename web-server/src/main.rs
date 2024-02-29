@@ -2,24 +2,46 @@ use std::{
     borrow::Cow,
     env,
     fs::File,
-    io::{self, Read, Write},
+    io::{Read, Write},
     net::{TcpListener, TcpStream},
     path::Path,
 };
 
 use bytes::{BufMut, BytesMut};
+use crossbeam::channel::bounded;
+use crossbeam::channel::Receiver;
+
+const THREAD_COUNT: usize = 8;
 
 fn main() -> std::io::Result<()> {
     let address = env::var("ADDRESS").unwrap_or("127.0.0.1:80".to_owned());
+    let (sender, receiver) = bounded::<TcpStream>(2000);
 
     let listener = TcpListener::bind(address)?;
 
+    let mut threads = Vec::with_capacity(THREAD_COUNT);
+
+    for _ in 0..THREAD_COUNT {
+        let receiver = receiver.clone();
+        let thread = std::thread::spawn(move || process_requests(receiver));
+        threads.push(thread);
+    }
+
     for stream in listener.incoming() {
-        let stream = stream?;
-        handle_client(stream)?;
+        sender.send(stream?).unwrap();
+    }
+
+    for thread in threads {
+        thread.join().unwrap();
     }
 
     Ok(())
+}
+
+fn process_requests(receiver: Receiver<TcpStream>) {
+    for stream in receiver {
+        handle_client(stream).unwrap();
+    }
 }
 
 fn handle_client(mut stream: TcpStream) -> std::io::Result<()> {
