@@ -19,11 +19,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut threads = Vec::with_capacity(100);
 
-    for _ in 0..100 {
+    for _ in 0..threads.capacity() {
         let receiver = receiver.clone();
         let db = db.clone();
         let thread = std::thread::spawn(move || {
-            receive_streams(receiver, db);
+            stream_receiver(receiver, db);
         });
         threads.push(thread);
     }
@@ -39,7 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn receive_streams(receiver: Receiver<TcpStream>, db: Arc<Db>) {
+fn stream_receiver(receiver: Receiver<TcpStream>, db: Arc<Db>) {
     for stream in receiver {
         let db = db.clone();
         handle_stream(stream, db)
