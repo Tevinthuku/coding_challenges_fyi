@@ -4,26 +4,29 @@ use std::{
     fs::File,
     io::{Read, Write},
     net::{TcpListener, TcpStream},
+    num::NonZeroUsize,
     path::Path,
 };
 
 use bytes::{BufMut, BytesMut};
-use crossbeam::channel::bounded;
+use crossbeam::channel::unbounded;
 use crossbeam::channel::Receiver;
-
-const THREAD_COUNT: usize = 8;
 
 fn main() -> std::io::Result<()> {
     let address = env::var("ADDRESS").unwrap_or("127.0.0.1:80".to_owned());
-    let (sender, receiver) = bounded::<TcpStream>(2000);
+    let file_directory = env::var("FILE_DIRECTORY").unwrap_or("./www".to_owned());
+    let (sender, receiver) = unbounded::<TcpStream>();
 
     let listener = TcpListener::bind(address)?;
 
-    let mut threads = Vec::with_capacity(THREAD_COUNT);
+    let available_parallelism = std::thread::available_parallelism().map_or(2, NonZeroUsize::get);
 
-    for _ in 0..THREAD_COUNT {
+    let mut threads = Vec::with_capacity(available_parallelism);
+
+    for _ in 0..available_parallelism {
         let receiver = receiver.clone();
-        let thread = std::thread::spawn(move || process_requests(receiver));
+        let file_directory = file_directory.clone();
+        let thread = std::thread::spawn(move || process_requests(receiver, file_directory));
         threads.push(thread);
     }
 
@@ -38,13 +41,13 @@ fn main() -> std::io::Result<()> {
     Ok(())
 }
 
-fn process_requests(receiver: Receiver<TcpStream>) {
+fn process_requests(receiver: Receiver<TcpStream>, file_directory: String) {
     for stream in receiver {
-        handle_client(stream).unwrap();
+        handle_client(stream, &file_directory).unwrap();
     }
 }
 
-fn handle_client(mut stream: TcpStream) -> std::io::Result<()> {
+fn handle_client(mut stream: TcpStream, file_directory: &str) -> std::io::Result<()> {
     let mut buffer = [0; 1024];
 
     let read_bytes = stream.read(&mut buffer)?;
@@ -63,12 +66,14 @@ fn handle_client(mut stream: TcpStream) -> std::io::Result<()> {
             "/" => "index.html",
             path => &path[1..],
         };
-        let path = Path::new("./").join(path);
+
+        let path = Path::new(file_directory).join(path);
         let mut buffer = Vec::with_capacity(1024 * 1024);
-        let mut file = File::open(path);
+        let file = File::open(path);
+
         let mut file = match file {
             Ok(file) => file,
-            Err(err) => {
+            Err(_) => {
                 let mut response = BytesMut::with_capacity(512);
                 response.put_slice(request.http_version);
                 response.put_slice(b" 404 Not Found\r\n\r\n");
@@ -90,7 +95,7 @@ fn handle_client(mut stream: TcpStream) -> std::io::Result<()> {
 
 fn parse_request(first_line: &[u8]) -> std::io::Result<Request<'_>> {
     let mut split_by_space = first_line.split(|byte| *byte == b' ');
-    let method = split_by_space
+    let _method = split_by_space
         .next()
         .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidData))?;
     let path = split_by_space
@@ -101,7 +106,6 @@ fn parse_request(first_line: &[u8]) -> std::io::Result<Request<'_>> {
         .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidData))?;
 
     Ok(Request {
-        method,
         path: String::from_utf8_lossy(path),
         http_version,
     })
@@ -109,7 +113,6 @@ fn parse_request(first_line: &[u8]) -> std::io::Result<Request<'_>> {
 
 #[derive(Debug)]
 struct Request<'a> {
-    method: &'a [u8],
     path: Cow<'a, str>,
     http_version: &'a [u8],
 }
