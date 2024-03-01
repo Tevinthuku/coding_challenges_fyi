@@ -1522,6 +1522,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "chrono",
+ "crossbeam",
  "env_logger",
  "log",
  "rstest",
