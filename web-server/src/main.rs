@@ -179,7 +179,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_connection() {
+    async fn test_200_response() {
         let (send, recv) = oneshot::channel::<()>();
 
         let address = "127.0.0.1:8080";
