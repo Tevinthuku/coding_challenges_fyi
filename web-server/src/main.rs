@@ -185,7 +185,7 @@ mod tests {
     async fn test_connection() {
         let (send, recv) = oneshot::channel::<()>();
 
-        let address = "127.0.0.1:0";
+        let address = "127.0.0.1:8080";
         let join_handle = tokio::spawn(async move {
             run_server(address, "./www".to_owned(), recv).await.unwrap();
         });
@@ -212,7 +212,7 @@ mod tests {
     async fn test_not_found() {
         let (send, recv) = oneshot::channel::<()>();
 
-        let address = "127.0.0.1:0";
+        let address = "127.0.0.1:8081";
         let join_handle = tokio::spawn(async move {
             run_server(address, "./www".to_owned(), recv).await.unwrap();
         });
