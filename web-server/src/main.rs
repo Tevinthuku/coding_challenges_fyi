@@ -76,12 +76,12 @@ fn process_requests(receiver: Receiver<TcpStream>, file_directory: String) {
     let rt = Builder::new_current_thread().enable_all().build().unwrap();
     rt.block_on(async move {
         for stream in receiver {
-            handle_client(stream, &file_directory).await.unwrap();
+            handle_client(stream, file_directory.clone()).await.unwrap();
         }
     })
 }
 
-async fn handle_client(mut stream: TcpStream, file_directory: &str) -> std::io::Result<()> {
+async fn handle_client(mut stream: TcpStream, file_directory: String) -> std::io::Result<()> {
     let mut buffer = BytesMut::with_capacity(1024);
 
     let read_bytes = stream.read_buf(&mut buffer).await?;
@@ -101,7 +101,7 @@ async fn handle_client(mut stream: TcpStream, file_directory: &str) -> std::io::
             path => &path[1..],
         };
 
-        let path = Path::new(file_directory).join(path);
+        let path = Path::new(&file_directory).join(path);
         let mut buffer = Vec::with_capacity(1024 * 1024);
         let file = File::open(path).await;
 
