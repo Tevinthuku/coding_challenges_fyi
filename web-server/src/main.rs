@@ -38,9 +38,6 @@ async fn run_server(
 
     select! {
         _ = run_server_inner(address, sender.clone()) => {}
-        ctrl = signal::ctrl_c() => {
-            ctrl?;
-        },
         _ = shutdown => {}
     }
 
