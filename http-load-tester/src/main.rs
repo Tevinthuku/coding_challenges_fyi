@@ -1,6 +1,6 @@
 use clap::{command, Parser};
 use futures::{stream::FuturesUnordered, StreamExt};
-use std::{error::Error, time::Duration};
+use std::{collections::HashMap, error::Error, time::Duration};
 
 #[tokio::main]
 
@@ -74,6 +74,7 @@ struct Args {
 }
 
 struct Stats {
+    url: String,
     status_code: StatusCode,
     duration: std::time::Duration,
     ttfb: std::time::Duration,
@@ -105,15 +106,15 @@ async fn handle_concurrent_requests(
 async fn send_url_requests(url: String, number_of_requests: usize) -> Vec<Stats> {
     let mut results = Vec::with_capacity(number_of_requests);
     for _ in 0..number_of_requests {
-        let stat = send_single_request(&url).await;
+        let stat = send_single_request(url.clone()).await;
         results.push(stat);
     }
     results
 }
 
-async fn send_single_request(url: &str) -> Stats {
+async fn send_single_request(url: String) -> Stats {
     let start = std::time::Instant::now();
-    let response = reqwest::get(url).await;
+    let response = reqwest::get(&url).await;
     let (ttfb, ttlb, status_code) = if let Ok(response) = response {
         let status = response.status();
         let status_code = if status.is_success() {
@@ -132,6 +133,7 @@ async fn send_single_request(url: &str) -> Stats {
     };
 
     Stats {
+        url,
         status_code,
         duration: start.elapsed(),
         ttfb,
@@ -140,72 +142,104 @@ async fn send_single_request(url: &str) -> Stats {
 }
 
 async fn compute_statistics(mut receiver: tokio::sync::mpsc::UnboundedReceiver<Vec<Stats>>) {
-    let mut all_requests = 0;
-    let mut success = 0;
-    let mut client_errors = 0;
-    let mut server_errors = 0;
-
-    let mut min_duration = Duration::MAX;
-    let mut max_duration = Duration::from_secs(0);
-    let mut total_duration = Duration::from_secs(0);
-
-    let mut total_ttfb = Duration::from_secs(0);
-    let mut min_ttfb = Duration::MAX;
-    let mut max_ttfb = Duration::from_secs(0);
-
-    let mut total_ttlb = Duration::from_secs(0);
-    let mut min_ttlb = Duration::MAX;
-    let mut max_ttlb = Duration::from_secs(0);
+    let mut url_stats: HashMap<String, UrlStatistics> = std::collections::HashMap::new();
 
     while let Some(stats) = receiver.recv().await {
-        all_requests += stats.len();
         for stat in stats {
-            match stat.status_code {
-                StatusCode::Success => success += 1,
-                StatusCode::ClientError => client_errors += 1,
-                StatusCode::ServerError => server_errors += 1,
-            }
-
-            max_duration = max_duration.max(stat.duration);
-            min_duration = min_duration.min(stat.duration);
-            total_duration += stat.duration;
-
-            total_ttfb += stat.ttfb;
-            min_ttfb = min_ttfb.min(stat.ttfb);
-            max_ttfb = max_ttfb.max(stat.ttfb);
-
-            total_ttlb += stat.ttlb;
-            min_ttlb = min_ttlb.min(stat.ttlb);
-            max_ttlb = max_ttlb.max(stat.ttlb);
+            url_stats
+                .entry(stat.url.clone())
+                .and_modify(|url_stats| url_stats.add_stat(&stat))
+                .or_insert(UrlStatistics::new(&stat));
         }
     }
+    url_stats.into_iter().for_each(|(_, stats)| {
+        stats.print_output();
+        println!("-------------------------------");
+    });
+}
 
-    println!("Results:");
-    println!(" Total Requests (2XX).......................: {}", success);
-    println!(
-        " Failed Requests (4XX)...................: {}",
-        client_errors
-    );
-    println!(
-        " Failed Requests (5XX)...................: {}",
-        server_errors
-    );
-    println!(
-        " Total Request Time (s) (Min, Max, Mean).....: {:.2}, {:.2}, {:.2}",
-        min_duration.as_secs_f64(),
-        max_duration.as_secs_f64(),
-        total_duration.as_secs_f64() / all_requests as f64
-    );
-    println!(
-        " Time to First Byte (s) (Min, Max, Mean).....: {:.2}, {:.2}, {:.2}",
-        min_ttfb.as_secs_f64(),
-        max_ttfb.as_secs_f64(),
-        total_ttfb.as_secs_f64() / all_requests as f64
-    );
-    println!(
-        " Time to Last Byte (s) (Min, Max, Mean)......: {:.2}, {:.2}, {:.2}",
-        min_ttlb.as_secs_f64(),
-        max_ttlb.as_secs_f64(),
-        total_ttlb.as_secs_f64() / all_requests as f64
-    );
+#[derive(Default)]
+struct UrlStatistics {
+    url: String,
+    all_requests: usize,
+    success: usize,
+    client_errors: usize,
+    server_errors: usize,
+
+    min_duration: Duration,
+    max_duration: Duration,
+    total_duration: Duration,
+
+    total_ttfb: Duration,
+    min_ttfb: Duration,
+    max_ttfb: Duration,
+
+    total_ttlb: Duration,
+    min_ttlb: Duration,
+    max_ttlb: Duration,
+}
+
+impl UrlStatistics {
+    pub fn new(stat: &Stats) -> Self {
+        let mut url_stats = UrlStatistics {
+            url: stat.url.clone(),
+            ..Default::default()
+        };
+        url_stats.add_stat(stat);
+        url_stats
+    }
+    pub fn add_stat(&mut self, stat: &Stats) {
+        self.all_requests += 1;
+        match stat.status_code {
+            StatusCode::Success => self.success += 1,
+            StatusCode::ClientError => self.client_errors += 1,
+            StatusCode::ServerError => self.server_errors += 1,
+        }
+
+        self.max_duration = self.max_duration.max(stat.duration);
+        self.min_duration = self.min_duration.min(stat.duration);
+        self.total_duration += stat.duration;
+
+        self.total_ttfb += stat.ttfb;
+        self.min_ttfb = self.min_ttfb.min(stat.ttfb);
+        self.max_ttfb = self.max_ttfb.max(stat.ttfb);
+
+        self.total_ttlb += stat.ttlb;
+        self.min_ttlb = self.min_ttlb.min(stat.ttlb);
+        self.max_ttlb = self.max_ttlb.max(stat.ttlb);
+    }
+
+    pub fn print_output(self) {
+        println!("Results for {}", self.url);
+        println!(
+            " Total Requests (2XX).......................: {}",
+            self.success
+        );
+        println!(
+            " Failed Requests (4XX)...................: {}",
+            self.client_errors
+        );
+        println!(
+            " Failed Requests (5XX)...................: {}",
+            self.server_errors
+        );
+        println!(
+            " Total Request Time (s) (Min, Max, Mean).....: {:.2}, {:.2}, {:.2}",
+            self.min_duration.as_secs_f64(),
+            self.max_duration.as_secs_f64(),
+            self.total_duration.as_secs_f64() / self.all_requests as f64
+        );
+        println!(
+            " Time to First Byte (s) (Min, Max, Mean).....: {:.2}, {:.2}, {:.2}",
+            self.min_ttfb.as_secs_f64(),
+            self.max_ttfb.as_secs_f64(),
+            self.total_ttfb.as_secs_f64() / self.all_requests as f64
+        );
+        println!(
+            " Time to Last Byte (s) (Min, Max, Mean)......: {:.2}, {:.2}, {:.2}",
+            self.min_ttlb.as_secs_f64(),
+            self.max_ttlb.as_secs_f64(),
+            self.total_ttlb.as_secs_f64() / self.all_requests as f64
+        );
+    }
 }
