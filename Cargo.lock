@@ -1004,6 +1004,7 @@ name = "http-load-tester"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "futures",
  "reqwest",
  "tokio",
 ]

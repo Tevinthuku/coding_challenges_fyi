@@ -1,7 +1,15 @@
 ### How to run
 
+#### With a URL
+
 ```
 cargo run -- -u http://localhost:8000 -n 20 -c 10
+```
+
+#### With a file
+
+```
+cargo run -- -f urls.txt -n 20 -c 10
 ```
 
 ### Example output
