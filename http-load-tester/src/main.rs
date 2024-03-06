@@ -148,11 +148,12 @@ async fn compute_statistics(mut receiver: tokio::sync::mpsc::UnboundedReceiver<V
         for stat in stats {
             url_stats
                 .entry(stat.url.clone())
-                .and_modify(|url_stats| url_stats.add_stat(&stat))
-                .or_insert(UrlStatistics::new(&stat));
+                .or_default()
+                .add_stat(&stat);
         }
     }
-    url_stats.into_iter().for_each(|(_, stats)| {
+    url_stats.into_iter().for_each(|(url, stats)| {
+        println!("Results for {}", url);
         stats.print_output();
         println!("-------------------------------");
     });
@@ -160,7 +161,6 @@ async fn compute_statistics(mut receiver: tokio::sync::mpsc::UnboundedReceiver<V
 
 #[derive(Default)]
 struct UrlStatistics {
-    url: String,
     all_requests: usize,
     success: usize,
     client_errors: usize,
@@ -180,14 +180,6 @@ struct UrlStatistics {
 }
 
 impl UrlStatistics {
-    pub fn new(stat: &Stats) -> Self {
-        let mut url_stats = UrlStatistics {
-            url: stat.url.clone(),
-            ..Default::default()
-        };
-        url_stats.add_stat(stat);
-        url_stats
-    }
     pub fn add_stat(&mut self, stat: &Stats) {
         self.all_requests += 1;
         match stat.status_code {
@@ -210,7 +202,6 @@ impl UrlStatistics {
     }
 
     pub fn print_output(self) {
-        println!("Results for {}", self.url);
         println!(
             " Total Requests (2XX).......................: {}",
             self.success
