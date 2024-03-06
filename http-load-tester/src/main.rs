@@ -8,9 +8,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     let (sender, receiver) = tokio::sync::mpsc::unbounded_channel::<Vec<Stats>>();
 
-    let raw_urls = match (args.file.as_ref(), args.url) {
+    let urls = match (args.file.as_ref(), args.url) {
         (Some(file), None) => {
             let file = std::fs::read_to_string(file)?;
+            let line_count = file.lines().count();
+            let repeat_factor = if line_count < args.number_of_requests {
+                args.number_of_requests / line_count
+            } else {
+                1
+            };
             file.lines()
                 .filter_map(|s| {
                     if s.trim().is_empty() {
@@ -19,27 +25,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         Some(s.to_owned())
                     }
                 })
+                .cycle()
+                .take(repeat_factor * line_count)
                 .collect()
         }
         (None, Some(url)) => vec![url],
         _ => {
-            eprintln!("Either file or url should be provided");
-            std::process::exit(1);
+            return Err("Either file or url should be provided".into());
         }
-    };
-
-    let urls = {
-        let raw_url_len = raw_urls.len();
-        let repeat_factor = if raw_url_len < args.number_of_requests && args.file.is_some() {
-            args.number_of_requests / raw_url_len
-        } else {
-            1
-        };
-        raw_urls
-            .into_iter()
-            .cycle()
-            .take(repeat_factor * raw_url_len)
-            .collect::<Vec<_>>()
     };
 
     let mut tasks = Vec::with_capacity(args.concurrency);
@@ -63,12 +56,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
+    /// URL to test. This option cannot be used with --f.
     #[arg(short)]
     url: Option<String>,
+    /// Number of requests to send. Default is 10.
     #[arg(short, default_value_t = 10)]
     number_of_requests: usize,
+    /// Level of concurrency for requests. Default is 1.
     #[arg(short, default_value_t = 1)]
     concurrency: usize,
+    /// File containing URLs to test. This option cannot be used with --u.
     #[arg(short)]
     file: Option<String>,
 }
@@ -98,7 +95,9 @@ async fn handle_concurrent_requests(
         .collect::<FuturesUnordered<_>>();
 
     while let Some(result) = futures.next().await {
-        sender.send(result).unwrap();
+        if let Err(err) = sender.send(result) {
+            eprintln!("Error sending result: {}", err);
+        }
     }
     drop(sender);
 }
@@ -148,7 +147,7 @@ async fn compute_statistics(mut receiver: tokio::sync::mpsc::UnboundedReceiver<V
         for stat in stats {
             url_stats
                 .entry(stat.url.clone())
-                .or_default()
+                .or_insert(UrlStatistics::new())
                 .add_stat(&stat);
         }
     }
@@ -159,7 +158,6 @@ async fn compute_statistics(mut receiver: tokio::sync::mpsc::UnboundedReceiver<V
     });
 }
 
-#[derive(Default)]
 struct UrlStatistics {
     all_requests: usize,
     success: usize,
@@ -180,6 +178,27 @@ struct UrlStatistics {
 }
 
 impl UrlStatistics {
+    pub fn new() -> Self {
+        Self {
+            all_requests: 0,
+            success: 0,
+            client_errors: 0,
+            server_errors: 0,
+
+            min_duration: Duration::MAX,
+            max_duration: Duration::from_secs(0),
+            total_duration: Duration::from_secs(0),
+
+            total_ttfb: Duration::from_secs(0),
+            min_ttfb: Duration::MAX,
+            max_ttfb: Duration::from_secs(0),
+
+            total_ttlb: Duration::from_secs(0),
+            min_ttlb: Duration::MAX,
+            max_ttlb: Duration::from_secs(0),
+        }
+    }
+
     pub fn add_stat(&mut self, stat: &Stats) {
         self.all_requests += 1;
         match stat.status_code {
@@ -203,7 +222,7 @@ impl UrlStatistics {
 
     pub fn print_output(self) {
         println!(
-            " Total Requests (2XX).......................: {}",
+            " Successful Requests (2XX).......................: {}",
             self.success
         );
         println!(
