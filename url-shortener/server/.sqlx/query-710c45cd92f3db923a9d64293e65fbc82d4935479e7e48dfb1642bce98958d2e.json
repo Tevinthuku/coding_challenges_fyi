@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM urls\n        WHERE hash = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "710c45cd92f3db923a9d64293e65fbc82d4935479e7e48dfb1642bce98958d2e"
+}

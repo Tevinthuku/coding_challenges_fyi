@@ -2,21 +2,43 @@ name: Rust
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 env:
   CARGO_TERM_COLOR: always
+  POSTGRES_PASSWORD: ${{ vars.POSTGRES_PASSWORD }}
+  DATABASE_URL: postgres://postgres:${{ vars.POSTGRES_PASSWORD }}@localhost:5432/test_db
+  SQLX_OFFLINE: true
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
-
+    services:
+      # Label used to access the service container
+      postgres:
+        # Docker Hub image
+        image: postgres
+        # Provide the password for postgres
+        env:
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+          POSTGRES_DB: test_db
+          POSTGRES_USER: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          # Maps tcp port 5432 on service container to the host
+          - 5432:5432
     steps:
-    - uses: actions/checkout@v3
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+      - uses: actions/checkout@v3
+      - name: Build
+        run: cargo build --verbose
+      - name: Run tests
+        run: cargo test --verbose
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          SQLX_OFFLINE: true
