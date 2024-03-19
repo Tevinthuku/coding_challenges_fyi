@@ -1,9 +1,34 @@
-use std::collections::HashSet;
+use std::{
+    collections::HashSet,
+    env,
+    error::Error,
+    fs::File,
+    io::{BufRead, BufReader},
+};
 
 use itertools::Itertools;
 
-fn main() {
-    println!("Hello, world!");
+const SKIP_CHALLENGE_PATH: usize = 1;
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let mut args = env::args().skip(SKIP_CHALLENGE_PATH);
+
+    let original_file = args.next().ok_or("Failed to get the original file")?;
+    let f = File::open(original_file)?;
+    let f = BufReader::new(f);
+    let content = f.lines().collect::<Result<Vec<_>, _>>()?;
+    let content = content.iter().map(|line| line.as_str()).collect_vec();
+
+    let new_file = args.next().ok_or("Failed to get the new file")?;
+    let f = File::open(new_file)?;
+    let f = BufReader::new(f);
+    let content2 = f.lines().collect::<Result<Vec<_>, _>>()?;
+    let content2 = content2.iter().map(|line| line.as_str()).collect_vec();
+
+    let diff = differences(&content, &content2);
+    println!("Diff: {:?}", diff);
+
+    Ok(())
 }
 
 fn differences(lines1: &[&str], lines2: &[&str]) -> Vec<String> {
