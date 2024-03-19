@@ -6,7 +6,7 @@ fn main() {
     println!("Hello, world!");
 }
 
-fn differences_between_2_lists(lines1: &[&str], lines2: &[&str]) -> Vec<String> {
+fn differences(lines1: &[&str], lines2: &[&str]) -> Vec<String> {
     let common = longest_common_sequence_for_many(lines1, lines2);
     let common = common
         .iter()
@@ -135,7 +135,7 @@ mod tests {
         lines_2: &'static [&'static str],
         expected_diff: &'static [&'static str],
     ) {
-        let mut result = super::differences_between_2_lists(lines_1, lines_2);
+        let mut result = super::differences(lines_1, lines_2);
         result.sort();
         let mut expected_diff = expected_diff.to_vec();
         expected_diff.sort();
