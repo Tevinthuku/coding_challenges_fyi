@@ -1,14 +1,16 @@
 [workspace]
 
 members = [
-    "ccwc", 
-    "cut", 
-    "http-load-tester", 
-    "huffman-compression", 
-    "json-parser", 
-    "load-balancer", 
-    "redis-server", 
-    "sort-tool", "url-shortener/server", 
+    "ccwc",
+    "cut",
+    "diff-tool",
+    "http-load-tester",
+    "huffman-compression",
+    "json-parser",
+    "load-balancer",
+    "redis-server",
+    "sort-tool",
+    "url-shortener/server",
     "web-server",
 ]
 
