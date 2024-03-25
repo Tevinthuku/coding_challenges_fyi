@@ -189,7 +189,7 @@ mod tests {
         lines_2: &'static [&'static str],
         expected_lcs: &'static [&'static str],
     ) {
-        let result = super::longest_common_sequence_for_many(&lines_1, &lines_2);
+        let result = super::longest_common_sequence_for_many(lines_1, lines_2);
         let expected_lcs = expected_lcs.iter().copied().collect::<HashSet<_>>();
         assert_eq!(result, expected_lcs);
     }
