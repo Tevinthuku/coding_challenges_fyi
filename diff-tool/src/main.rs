@@ -1,10 +1,17 @@
+use rayon::prelude::*;
 use std::{
     collections::HashSet,
     env,
     error::Error,
     fs::File,
     io::{BufRead, BufReader},
+    mem,
+    sync::mpsc::{Receiver, Sender},
+    time::Instant,
 };
+use std::{sync::mpsc::channel, thread};
+
+use bytes::{Bytes, BytesMut};
 
 const SKIP_CHALLENGE_PATH: usize = 1;
 
@@ -12,33 +19,92 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args().skip(SKIP_CHALLENGE_PATH);
 
     let original_file = args.next().ok_or("Failed to get the original file")?;
+    let second_file = args.next().ok_or("Failed to get the new file")?;
+    let (tx, rx) = channel::<Bytes>();
+
+    let thread = thread::spawn(|| read_second_file(second_file, tx).unwrap());
+
+    let now = Instant::now();
     let f = File::open(original_file)?;
     let f = BufReader::new(f);
     let content1 = f.lines().collect::<Result<Vec<_>, _>>()?;
+    let content1 = content1
+        .iter()
+        .map(|line| line.as_str())
+        .collect::<Vec<_>>();
+    handle_differences_from_chunks(&content1, rx)?;
+    thread.join().unwrap();
+    let elapsed = now.elapsed();
+    println!("Elapsed: {}", elapsed.as_secs());
+    Ok(())
+}
 
-    let new_file = args.next().ok_or("Failed to get the new file")?;
-    let f = File::open(new_file)?;
-    let f = BufReader::new(f);
-    let content2 = f.lines().collect::<Result<Vec<_>, _>>()?;
+const BUFFER_SIZE: usize = 1024 * 512;
 
-    let diff = differences(&content1, &content2);
+fn read_second_file(
+    original_file: String,
+    bytes_sender: Sender<Bytes>,
+) -> Result<(), Box<dyn Error>> {
+    let file = File::open(original_file)?;
+    let mut file = BufReader::with_capacity(BUFFER_SIZE, file);
+    let mut left_over = BytesMut::with_capacity(BUFFER_SIZE);
 
-    diff.for_each(|item| {
-        println!("{}", item);
-    });
+    loop {
+        let bytes_filled = file.fill_buf()?;
+        if bytes_filled.is_empty() {
+            break;
+        }
+        let bytes_consumed = bytes_filled.len();
+
+        let last_newline = bytes_filled.iter().rposition(|&b| b == b'\n');
+        if let Some(new_line_idx) = last_newline {
+            let bytes = &bytes_filled[..new_line_idx + 1];
+            left_over.extend_from_slice(bytes);
+            let bytes_to_send = mem::take(&mut left_over);
+            let bytes_to_send = bytes_to_send.freeze();
+            bytes_sender.send(bytes_to_send).unwrap();
+            if new_line_idx + 1 < bytes_consumed {
+                left_over.extend_from_slice(&bytes_filled[new_line_idx + 1..]);
+            }
+        }
+        file.consume(bytes_consumed);
+    }
+    drop(bytes_sender);
+    Ok(())
+}
+
+fn handle_differences_from_chunks(
+    lines1: &[&str],
+    receiver: Receiver<Bytes>,
+) -> Result<(), Box<dyn Error>> {
+    let received = receiver
+        .into_iter()
+        .flat_map(|chunk| {
+            chunk
+                .par_split(|b| *b == b'\n')
+                .map(|line| std::str::from_utf8(line).map(ToString::to_string))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let received = received
+        .iter()
+        .map(|line| line.as_str())
+        .collect::<Vec<_>>();
+    let diff = differences(lines1, &received);
+    diff.for_each(|line| println!("{}", line));
     Ok(())
 }
 
 fn differences<'a>(
-    lines1: &'a [impl AsRef<str>],
-    lines2: &'a [impl AsRef<str>],
-) -> impl Iterator<Item = String> + 'a {
+    lines1: &'a [&'a str],
+    lines2: &'a [&'a str],
+) -> impl ParallelIterator<Item = String> + 'a {
     let common = longest_common_sequence_for_many(lines1, lines2);
 
     lines1
-        .iter()
-        .map(|line1| (line1.as_ref(), true))
-        .chain(lines2.iter().map(|line2| (line2.as_ref(), false)))
+        .par_iter()
+        .map(|line1| (line1, true))
+        .chain(lines2.par_iter().map(|line2| (line2, false)))
         .filter_map(move |(line, is_original)| {
             if common.contains(line) {
                 None
@@ -49,35 +115,34 @@ fn differences<'a>(
 }
 
 fn longest_common_sequence_for_many<'a>(
-    lines1: &'a [impl AsRef<str>],
-    lines2: &'a [impl AsRef<str>],
+    lines1: &'a [&'a str],
+    lines2: &'a [&'a str],
 ) -> HashSet<&'a str> {
     lines1
-        .iter()
+        .par_iter()
         .flat_map(|line1| {
             lines2
-                .iter()
-                .filter_map(|line2| longest_common_sequence(line1.as_ref(), line2.as_ref()))
+                .par_iter()
+                .filter_map(|line2| longest_common_sequence(line1, line2))
         })
         .collect::<HashSet<_>>()
 }
 
 fn longest_common_sequence<'a>(str1: &'a str, str2: &'a str) -> Option<&'a str> {
-    let peek1 = str1.chars().peekable();
-    let mut peek2 = str2.chars().peekable();
+    // @Tev: TBH I'm not 100% sure about this, step1 compared character to character, however
+    // the next steps seem to be concerned with the entire string itself, not just the characters within the strings that match.
 
-    for c1 in peek1 {
-        peek2.next_if_eq(&c1)?;
+    if str1 == str2 {
+        return Some(str1);
     }
-
-    Some(str1)
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
 
-    use itertools::Itertools;
+    use rayon::iter::ParallelIterator;
     use rstest::{fixture, rstest};
 
     #[rstest]
@@ -124,8 +189,6 @@ mod tests {
         lines_2: &'static [&'static str],
         expected_lcs: &'static [&'static str],
     ) {
-        let lines_1 = lines_1.iter().map(ToString::to_string).collect::<Vec<_>>();
-        let lines_2 = lines_2.iter().map(ToString::to_string).collect::<Vec<_>>();
         let result = super::longest_common_sequence_for_many(&lines_1, &lines_2);
         let expected_lcs = expected_lcs.iter().copied().collect::<HashSet<_>>();
         assert_eq!(result, expected_lcs);
@@ -157,9 +220,8 @@ mod tests {
         lines_2: &'static [&'static str],
         expected_diff: &'static [&'static str],
     ) {
-        let result = super::differences(lines_1, lines_2)
-            .sorted()
-            .collect::<Vec<_>>();
+        let mut result = super::differences(lines_1, lines_2).collect::<Vec<_>>();
+        result.sort();
         let mut expected_diff = expected_diff.to_vec();
         expected_diff.sort();
         assert_eq!(result, expected_diff);
