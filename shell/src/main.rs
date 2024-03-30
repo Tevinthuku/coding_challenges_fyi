@@ -34,7 +34,7 @@ fn main() -> io::Result<()> {
             }
         };
 
-        let mut output = piped_commands.try_fold(first_command_output, |a, c| {
+        let output = piped_commands.try_fold(first_command_output, |a, c| {
             let maybe_child = execute_command(c, Some(a));
             match maybe_child {
                 Ok(CommandExecution::ChildOutput(out)) => Ok(out),
@@ -50,9 +50,8 @@ fn main() -> io::Result<()> {
             }
         })?;
 
-        let mut buffer = Vec::new();
-        output.read_to_end(&mut buffer)?;
-        stdout_handle.write_all(&buffer)?;
+        let bytes = output.bytes().collect::<Result<Vec<_>, _>>()?;
+        stdout_handle.write_all(&bytes)?;
     }
 
     Ok(())
