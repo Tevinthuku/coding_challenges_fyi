@@ -9,6 +9,7 @@ members = [
     "json-parser",
     "load-balancer",
     "redis-server",
+    "shell",
     "sort-tool",
     "url-shortener/server",
     "web-server",
