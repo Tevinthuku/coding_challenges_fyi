@@ -1,9 +1,16 @@
 use std::{
-    io::{self, BufRead, Read, Write},
-    process::{ChildStdout, Command, Stdio},
+    io::{self, BufRead, Write},
+    process::Stdio,
 };
 
-fn main() -> io::Result<()> {
+use futures::{stream, StreamExt, TryStreamExt};
+use tokio::{
+    io::AsyncReadExt,
+    process::{ChildStdout, Command},
+};
+
+#[tokio::main]
+async fn main() -> io::Result<()> {
     let stdout = io::stdout();
     let mut stdout_handle = stdout.lock();
     let stdin = std::io::stdin();
@@ -22,7 +29,7 @@ fn main() -> io::Result<()> {
             let first_command = piped_commands
                 .next()
                 .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Could not get command"))?;
-            let first_command_result = execute_command(first_command, None);
+            let first_command_result = execute_command(first_command, None).await;
             match first_command_result {
                 Ok(CommandExecution::ChildOutput(child)) => child,
                 Ok(CommandExecution::Exit) => break,
@@ -34,23 +41,35 @@ fn main() -> io::Result<()> {
             }
         };
 
-        let output = piped_commands.try_fold(first_command_output, |a, c| {
-            let maybe_child = execute_command(c, Some(a));
-            match maybe_child {
-                Ok(CommandExecution::ChildOutput(out)) => Ok(out),
-                Ok(CommandExecution::Exit) => Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "Did not expect exit command in piped commands",
-                )),
-                Ok(CommandExecution::DirectoryChange) => Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "Did not expect cd command in piped commands",
-                )),
-                Err(e) => Err(e),
-            }
-        })?;
+        let commands_stream = stream::iter(piped_commands);
 
-        let bytes = output.bytes().collect::<Result<Vec<_>, _>>()?;
+        let output = commands_stream
+            .map(Ok)
+            .try_fold(first_command_output, |a, command| async move {
+                let command = execute_command(command, Some(a)).await?;
+                let name = command.name();
+                if let CommandExecution::ChildOutput(out) = command {
+                    Ok(out)
+                } else {
+                    Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Did not expect {name} command in piped commands"),
+                    )
+                    .into())
+                }
+            })
+            .await;
+
+        let mut output = match output {
+            Ok(output) => output,
+            Err(CommandExecutionError::CtrlC) => {
+                continue;
+            }
+            Err(CommandExecutionError::Io(err)) => return Err(err),
+        };
+
+        let mut bytes = Vec::new();
+        output.read_to_end(&mut bytes).await?;
         stdout_handle.write_all(&bytes)?;
     }
 
@@ -63,10 +82,20 @@ enum CommandExecution {
     DirectoryChange,
 }
 
-fn execute_command(
+impl CommandExecution {
+    fn name(&self) -> &str {
+        match self {
+            CommandExecution::ChildOutput(_) => "ChildOutput",
+            CommandExecution::Exit => "Exit",
+            CommandExecution::DirectoryChange => "DirectoryChange",
+        }
+    }
+}
+
+async fn execute_command(
     command: &str,
     input: Option<ChildStdout>,
-) -> Result<CommandExecution, io::Error> {
+) -> Result<CommandExecution, CommandExecutionError> {
     let mut command = command.split_whitespace();
     let program = command
         .next()
@@ -86,15 +115,47 @@ fn execute_command(
         std::env::set_current_dir(path)?;
         return Ok(CommandExecution::DirectoryChange);
     }
-    let stdin = input.map_or(Stdio::null(), Stdio::from);
-    let child = Command::new(program)
+    let stdin = match input {
+        Some(out) => ChildStdout::try_into(out)?,
+        None => Stdio::null(),
+    };
+    let mut child = Command::new(program)
         .args(&args)
         .stdin(stdin)
         .stdout(Stdio::piped())
         .spawn()?;
-    let output = child.stdout.ok_or_else(|| {
+
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            let _ = child.kill().await;
+            return Err(CommandExecutionError::CtrlC);
+        }
+        _ = child.wait() => {}
+    }
+
+    let output = child.stdout.take().ok_or_else(|| {
         io::Error::new(io::ErrorKind::Other, "Could not get child process' stdout")
     })?;
 
     Ok(CommandExecution::ChildOutput(output))
+}
+
+enum CommandExecutionError {
+    Io(io::Error),
+    CtrlC,
+}
+
+impl From<io::Error> for CommandExecutionError {
+    fn from(e: io::Error) -> Self {
+        CommandExecutionError::Io(e)
+    }
+}
+
+impl std::fmt::Display for CommandExecutionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CommandExecutionError::Io(e) => write!(f, "{e}"),
+            CommandExecutionError::CtrlC => write!(f, "Ctrl-C pressed"),
+        }
+    }
 }
