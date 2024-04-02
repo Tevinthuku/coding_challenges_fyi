@@ -123,11 +123,16 @@ async fn execute_command(
 
     let mut command = Command::new(program);
 
-    if input.is_some() {
-        command.stdin(Stdio::piped());
-    }
+    let stdin = input
+        .is_some()
+        .then(Stdio::piped)
+        .unwrap_or(Stdio::inherit());
 
-    let mut child = command.args(&args).stdout(Stdio::piped()).spawn()?;
+    let mut child = command
+        .args(&args)
+        .stdin(stdin)
+        .stdout(Stdio::piped())
+        .spawn()?;
 
     if let Some(input) = input {
         let mut stdin = child
