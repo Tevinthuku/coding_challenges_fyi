@@ -5,8 +5,8 @@ use std::{
 
 use futures::{stream, StreamExt, TryStreamExt};
 use tokio::{
-    io::AsyncReadExt,
-    process::{ChildStdout, Command},
+    io::{AsyncReadExt, AsyncWriteExt},
+    process::{Child, ChildStdout, Command},
 };
 
 #[tokio::main]
@@ -20,9 +20,11 @@ async fn main() -> io::Result<()> {
         stdout_handle.flush()?;
         let mut buffer = String::new();
         stdin_handle.read_line(&mut buffer)?;
+
         if buffer.trim().is_empty() {
             continue;
         }
+
         let mut piped_commands = buffer.split('|');
 
         let first_command_output = {
@@ -34,6 +36,7 @@ async fn main() -> io::Result<()> {
                 Ok(CommandExecution::ChildOutput(child)) => child,
                 Ok(CommandExecution::Exit) => break,
                 Ok(CommandExecution::DirectoryChange) => continue,
+                Err(CommandExecutionError::CtrlC) => continue,
                 Err(e) => {
                     io::stderr().write_all(format!("{e}\n").as_bytes())?;
                     continue;
@@ -45,22 +48,25 @@ async fn main() -> io::Result<()> {
 
         let output = commands_stream
             .map(Ok)
-            .try_fold(first_command_output, |a, command| async move {
-                let command = execute_command(command, Some(a)).await?;
-                let name = command.name();
-                if let CommandExecution::ChildOutput(out) = command {
-                    Ok(out)
-                } else {
-                    Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("Did not expect {name} command in piped commands"),
-                    )
-                    .into())
-                }
-            })
+            .try_fold(
+                first_command_output,
+                |prev_child_output, command| async move {
+                    let command = execute_command(command, Some(prev_child_output)).await?;
+                    let name = command.name();
+                    if let CommandExecution::ChildOutput(out) = command {
+                        Ok(out)
+                    } else {
+                        Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            format!("Did not expect {name} command in piped commands"),
+                        )
+                        .into())
+                    }
+                },
+            )
             .await;
 
-        let mut output = match output {
+        let output = match output {
             Ok(output) => output,
             Err(CommandExecutionError::CtrlC) => {
                 continue;
@@ -68,16 +74,15 @@ async fn main() -> io::Result<()> {
             Err(CommandExecutionError::Io(err)) => return Err(err),
         };
 
-        let mut bytes = Vec::new();
-        output.read_to_end(&mut bytes).await?;
-        stdout_handle.write_all(&bytes)?;
+        stdout_handle.write_all(&output)?;
     }
 
     Ok(())
 }
 
+#[derive(Debug)]
 enum CommandExecution {
-    ChildOutput(ChildStdout),
+    ChildOutput(Vec<u8>),
     Exit,
     DirectoryChange,
 }
@@ -94,7 +99,7 @@ impl CommandExecution {
 
 async fn execute_command(
     command: &str,
-    input: Option<ChildStdout>,
+    input: Option<Vec<u8>>,
 ) -> Result<CommandExecution, CommandExecutionError> {
     let mut command = command.split_whitespace();
     let program = command
@@ -115,31 +120,56 @@ async fn execute_command(
         std::env::set_current_dir(path)?;
         return Ok(CommandExecution::DirectoryChange);
     }
-    let stdin = match input {
-        Some(out) => ChildStdout::try_into(out)?,
-        None => Stdio::null(),
-    };
-    let mut child = Command::new(program)
-        .args(&args)
-        .stdin(stdin)
-        .stdout(Stdio::piped())
-        .spawn()?;
+
+    let mut command = Command::new(program);
+
+    if input.is_some() {
+        command.stdin(Stdio::piped());
+    }
+
+    let mut child = command.args(&args).stdout(Stdio::piped()).spawn()?;
+
+    if let Some(input) = input {
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Could not get child stdin"))?;
+        stdin.write_all(&input).await?;
+    }
 
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
             let _ = child.kill().await;
-            return Err(CommandExecutionError::CtrlC);
+            Err(CommandExecutionError::CtrlC)
         }
-        _ = child.wait() => {}
+        output = get_child_output(&mut child) => {
+            let output = output?;
+            Ok(CommandExecution::ChildOutput(output))
+        }
     }
-
-    let output = child.stdout.take().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::Other, "Could not get child process' stdout")
-    })?;
-
-    Ok(CommandExecution::ChildOutput(output))
 }
 
+async fn get_child_output(child: &mut Child) -> io::Result<Vec<u8>> {
+    use futures::try_join;
+
+    async fn read_to_end(mut io: ChildStdout) -> io::Result<Vec<u8>> {
+        let mut buffer = Vec::new();
+        io.read_to_end(&mut buffer).await?;
+        Ok(buffer)
+    }
+
+    let stdout = child.stdout.take().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            "Could not get child stdout for reading",
+        )
+    })?;
+    let (_, buffer) = try_join!(child.wait(), read_to_end(stdout))?;
+
+    Ok(buffer)
+}
+
+#[derive(Debug)]
 enum CommandExecutionError {
     Io(io::Error),
     CtrlC,
