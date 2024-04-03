@@ -1,5 +1,5 @@
 use std::{
-    io::{self, BufRead, Write},
+    io::{self, BufRead, Read, Write},
     process::Stdio,
 };
 
@@ -7,6 +7,7 @@ use futures::{stream, StreamExt, TryStreamExt};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     process::{Child, ChildStdout, Command},
+    sync::mpsc::Receiver,
 };
 
 #[tokio::main]
@@ -15,6 +16,10 @@ async fn main() -> io::Result<()> {
     let mut stdout_handle = stdout.lock();
     let stdin = std::io::stdin();
     let mut stdin_handle = stdin.lock();
+    let (tx, rx) = tokio::sync::mpsc::channel::<String>(2);
+    let command_history_handle = tokio::spawn(async move {
+        save_command_history(rx).await;
+    });
     loop {
         stdout_handle.write_all(b"ccsh> ")?;
         stdout_handle.flush()?;
@@ -31,7 +36,7 @@ async fn main() -> io::Result<()> {
             let first_command = piped_commands
                 .next()
                 .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Could not get command"))?;
-            let first_command_result = execute_command(first_command, None).await;
+            let first_command_result = execute_command(first_command, None, tx.clone()).await;
             match first_command_result {
                 Ok(CommandExecution::ChildOutput(child)) => child,
                 Ok(CommandExecution::Exit) => break,
@@ -48,22 +53,19 @@ async fn main() -> io::Result<()> {
 
         let output = commands_stream
             .map(Ok)
-            .try_fold(
-                first_command_output,
-                |prev_child_output, command| async move {
-                    let command = execute_command(command, Some(prev_child_output)).await?;
-                    let name = command.name();
-                    if let CommandExecution::ChildOutput(out) = command {
-                        Ok(out)
-                    } else {
-                        Err(io::Error::new(
-                            io::ErrorKind::Other,
-                            format!("Did not expect {name} command in piped commands"),
-                        )
-                        .into())
-                    }
-                },
-            )
+            .try_fold(first_command_output, |prev_child_output, command| async {
+                let command = execute_command(command, Some(prev_child_output), tx.clone()).await?;
+                let name = command.name();
+                if let CommandExecution::ChildOutput(out) = command {
+                    Ok(out)
+                } else {
+                    Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Did not expect {name} command in piped commands"),
+                    )
+                    .into())
+                }
+            })
             .await;
 
         let output = match output {
@@ -77,7 +79,40 @@ async fn main() -> io::Result<()> {
         stdout_handle.write_all(&output)?;
     }
 
+    drop(tx);
+
+    command_history_handle.await?;
+
     Ok(())
+}
+
+fn history_file_path() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|path| path.join(".ccsh_history"))
+}
+
+async fn save_command_history(mut rx: Receiver<String>) {
+    use std::fs::OpenOptions;
+    use std::io::prelude::*;
+
+    while let Some(command) = rx.recv().await {
+        let history_file = match history_file_path() {
+            Some(path) => path,
+            None => {
+                eprintln!("Failed to get history file path");
+                return;
+            }
+        };
+
+        let save_result = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(history_file)
+            .and_then(|mut file| writeln!(file, "{}", command));
+
+        if let Err(e) = save_result {
+            eprintln!("Could not save command to history: {e}");
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -100,7 +135,11 @@ impl CommandExecution {
 async fn execute_command(
     command: &str,
     input: Option<Vec<u8>>,
+    command_saving_sender: tokio::sync::mpsc::Sender<String>,
 ) -> Result<CommandExecution, CommandExecutionError> {
+    // Remove trailing newline which gets captured from the stdin handle.
+    let command = command.trim_end();
+    let full_command = command.to_owned();
     let mut command = command.split_whitespace();
     let program = command
         .next()
@@ -119,6 +158,15 @@ async fn execute_command(
         let path = std::path::Path::new(path);
         std::env::set_current_dir(path)?;
         return Ok(CommandExecution::DirectoryChange);
+    }
+
+    if program == "history" {
+        if let Some(history_file) = history_file_path() {
+            let mut file = std::fs::File::open(history_file)?;
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer)?;
+            return Ok(CommandExecution::ChildOutput(buffer));
+        }
     }
 
     let mut command = Command::new(program);
@@ -148,6 +196,9 @@ async fn execute_command(
             Err(CommandExecutionError::CtrlC)
         }
         output = get_child_output(&mut child) => {
+            if let Err(err) = command_saving_sender.send(full_command).await {
+                eprintln!("Could not save command to history: {err}");
+            }
             let output = output?;
             Ok(CommandExecution::ChildOutput(output))
         }
