@@ -1,6 +1,7 @@
 use std::{
-    io::{self, BufRead, Read, Write},
+    io::{self, BufRead, Write},
     process::Stdio,
+    sync::OnceLock,
 };
 
 use futures::{stream, StreamExt, TryStreamExt};
@@ -12,6 +13,10 @@ use tokio::{
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    run_shell().await
+}
+
+async fn run_shell() -> io::Result<()> {
     let stdout = io::stdout();
     let mut stdout_handle = stdout.lock();
     let stdin = std::io::stdin();
@@ -91,52 +96,6 @@ async fn main() -> io::Result<()> {
     Ok(())
 }
 
-fn history_file_path() -> Option<std::path::PathBuf> {
-    dirs::home_dir().map(|path| path.join(".ccsh_history"))
-}
-
-async fn save_command_history(mut rx: Receiver<String>) {
-    use std::fs::OpenOptions;
-    use std::io::prelude::*;
-
-    while let Some(command) = rx.recv().await {
-        let history_file = match history_file_path() {
-            Some(path) => path,
-            None => {
-                eprintln!("Failed to get history file path");
-                return;
-            }
-        };
-
-        let save_result = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(history_file)
-            .and_then(|mut file| writeln!(file, "{}", command));
-
-        if let Err(e) = save_result {
-            eprintln!("Could not save command to history: {e}");
-        }
-    }
-}
-
-#[derive(Debug)]
-enum CommandExecution {
-    ChildOutput(Vec<u8>),
-    Exit,
-    DirectoryChange,
-}
-
-impl CommandExecution {
-    fn name(&self) -> &str {
-        match self {
-            CommandExecution::ChildOutput(_) => "ChildOutput",
-            CommandExecution::Exit => "Exit",
-            CommandExecution::DirectoryChange => "DirectoryChange",
-        }
-    }
-}
-
 async fn execute_command(
     command: &str,
     input: Option<Vec<u8>>,
@@ -146,30 +105,55 @@ async fn execute_command(
         .next()
         .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Could not get program name"))?;
     let args = command.collect::<Vec<&str>>();
+
+    if let Some(result) = handle_internal_commands(program, &args).await? {
+        return Ok(result);
+    }
+
+    handle_external_commands(program, &args, input).await
+}
+
+static HOME_DIR_PATH: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
+async fn handle_internal_commands(
+    program: &str,
+    args: &[&str],
+) -> Result<Option<CommandExecution>, CommandExecutionError> {
     if program == "exit" {
-        return Ok(CommandExecution::Exit);
+        return Ok(Some(CommandExecution::Exit));
     }
     if program == "cd" {
-        let path = args.first().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                "Could not get path to change directory to",
-            )
-        })?;
-        let path = std::path::Path::new(path);
-        std::env::set_current_dir(path)?;
-        return Ok(CommandExecution::DirectoryChange);
+        if let Some(path) = args.first() {
+            let path = std::path::Path::new(path);
+            std::env::set_current_dir(path)?;
+        } else {
+            let home = HOME_DIR_PATH
+                .get_or_init(dirs::home_dir)
+                .as_ref()
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::Other, "Could not get home directory")
+                })?;
+            std::env::set_current_dir(home)?;
+        }
+        return Ok(Some(CommandExecution::DirectoryChange));
     }
 
     if program == "history" {
         if let Some(history_file) = history_file_path() {
-            let mut file = std::fs::File::open(history_file)?;
+            let mut file = tokio::fs::File::open(history_file).await?;
             let mut buffer = Vec::new();
-            file.read_to_end(&mut buffer)?;
-            return Ok(CommandExecution::ChildOutput(buffer));
+            file.read_to_end(&mut buffer).await?;
+            return Ok(Some(CommandExecution::ChildOutput(buffer)));
         }
     }
 
+    Ok(None)
+}
+
+async fn handle_external_commands(
+    program: &str,
+    args: &[&str],
+    input: Option<Vec<u8>>,
+) -> Result<CommandExecution, CommandExecutionError> {
     let mut command = Command::new(program);
 
     let stdin = input
@@ -178,7 +162,7 @@ async fn execute_command(
         .unwrap_or(Stdio::inherit());
 
     let mut child = command
-        .args(&args)
+        .args(args)
         .stdin(stdin)
         .stdout(Stdio::piped())
         .spawn()?;
@@ -223,6 +207,23 @@ async fn get_child_output(child: &mut Child) -> io::Result<Vec<u8>> {
 }
 
 #[derive(Debug)]
+enum CommandExecution {
+    ChildOutput(Vec<u8>),
+    Exit,
+    DirectoryChange,
+}
+
+impl CommandExecution {
+    fn name(&self) -> &str {
+        match self {
+            CommandExecution::ChildOutput(_) => "ChildOutput",
+            CommandExecution::Exit => "Exit",
+            CommandExecution::DirectoryChange => "DirectoryChange",
+        }
+    }
+}
+
+#[derive(Debug)]
 enum CommandExecutionError {
     Io(io::Error),
     CtrlC,
@@ -237,8 +238,46 @@ impl From<io::Error> for CommandExecutionError {
 impl std::fmt::Display for CommandExecutionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CommandExecutionError::Io(e) => write!(f, "{e}"),
-            CommandExecutionError::CtrlC => write!(f, "Ctrl-C pressed"),
+            CommandExecutionError::Io(e) => write!(f, "IO Error: {e}"),
+            CommandExecutionError::CtrlC => write!(f, "Operation cancelled by Ctrl-C"),
+        }
+    }
+}
+
+static HISTORY_FILE_PATH: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
+
+fn history_file_path() -> Option<std::path::PathBuf> {
+    HISTORY_FILE_PATH
+        .get_or_init(|| dirs::home_dir().map(|path| path.join(".ccsh_history")))
+        .clone()
+}
+
+async fn save_command_history(mut rx: Receiver<String>) {
+    use tokio::fs::OpenOptions;
+
+    while let Some(command) = rx.recv().await {
+        let history_file = match history_file_path() {
+            Some(path) => path,
+            None => {
+                eprintln!("Failed to get history file path");
+                return;
+            }
+        };
+
+        let save_result = async {
+            let mut file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(history_file)
+                .await?;
+
+            file.write_all(format!("{}\n", command).as_bytes()).await?;
+            file.flush().await
+        }
+        .await;
+
+        if let Err(e) = save_result {
+            eprintln!("Could not save command to history: {e}");
         }
     }
 }
