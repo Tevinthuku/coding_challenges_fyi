@@ -23,20 +23,21 @@ async fn main() -> io::Result<()> {
     loop {
         stdout_handle.write_all(b"ccsh> ")?;
         stdout_handle.flush()?;
-        let mut buffer = String::new();
-        stdin_handle.read_line(&mut buffer)?;
+        let mut command = String::new();
+        stdin_handle.read_line(&mut command)?;
+        let command = command.trim();
 
-        if buffer.trim().is_empty() {
+        if command.is_empty() {
             continue;
         }
 
-        let mut piped_commands = buffer.split('|');
+        let mut piped_commands = command.split('|');
 
         let first_command_output = {
             let first_command = piped_commands
                 .next()
                 .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Could not get command"))?;
-            let first_command_result = execute_command(first_command, None, tx.clone()).await;
+            let first_command_result = execute_command(first_command, None).await;
             match first_command_result {
                 Ok(CommandExecution::ChildOutput(child)) => child,
                 Ok(CommandExecution::Exit) => break,
@@ -49,12 +50,16 @@ async fn main() -> io::Result<()> {
             }
         };
 
+        if let Err(err) = tx.send(command.to_owned()).await {
+            eprintln!("Could not save command to history: {err}");
+        }
+
         let commands_stream = stream::iter(piped_commands);
 
         let output = commands_stream
             .map(Ok)
             .try_fold(first_command_output, |prev_child_output, command| async {
-                let command = execute_command(command, Some(prev_child_output), tx.clone()).await?;
+                let command = execute_command(command, Some(prev_child_output)).await?;
                 let name = command.name();
                 if let CommandExecution::ChildOutput(out) = command {
                     Ok(out)
@@ -135,11 +140,7 @@ impl CommandExecution {
 async fn execute_command(
     command: &str,
     input: Option<Vec<u8>>,
-    command_saving_sender: tokio::sync::mpsc::Sender<String>,
 ) -> Result<CommandExecution, CommandExecutionError> {
-    // Remove trailing newline which gets captured from the stdin handle.
-    let command = command.trim_end();
-    let full_command = command.to_owned();
     let mut command = command.split_whitespace();
     let program = command
         .next()
@@ -196,9 +197,6 @@ async fn execute_command(
             Err(CommandExecutionError::CtrlC)
         }
         output = get_child_output(&mut child) => {
-            if let Err(err) = command_saving_sender.send(full_command).await {
-                eprintln!("Could not save command to history: {err}");
-            }
             let output = output?;
             Ok(CommandExecution::ChildOutput(output))
         }
@@ -221,7 +219,6 @@ async fn get_child_output(child: &mut Child) -> io::Result<Vec<u8>> {
         )
     })?;
     let (_, buffer) = try_join!(child.wait(), read_to_end(stdout))?;
-
     Ok(buffer)
 }
 
