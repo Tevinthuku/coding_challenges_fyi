@@ -1,20 +1,28 @@
+use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use multipeek::multipeek;
-mod set;
+
+use crate::{db::Db, response::Response};
 pub mod get;
+mod set;
 
 pub struct Parser {
     content: multipeek::MultiPeek<std::vec::IntoIter<u8>>,
+    /// useful for debugging purposes
+    full_command: String,
 }
 
 impl Parser {
-    pub fn new(content: Vec<u8>) -> Self {
+    pub fn new(content: &[u8]) -> Self {
         let content = content
-            .into_iter()
+            .iter()
+            .copied()
             .filter(|b| !matches!(*b, b'\n' | b'\r'))
             .collect_vec();
+        let full_command = String::from_utf8_lossy(&content).to_string();
         Self {
             content: multipeek(content),
+            full_command,
         }
     }
 
@@ -67,5 +75,19 @@ impl Parser {
         }
 
         Some((buf, counter))
+    }
+}
+
+pub fn execute_command(data: &[u8], db: &Db) -> anyhow::Result<Response> {
+    let mut parser = Parser::new(data);
+    let full_command = parser.full_command.clone();
+    println!("Executing command: {}", full_command);
+    let command = parser.next_string().ok_or(anyhow!("Expected a command"))?;
+    match command.as_str() {
+        "get" => Ok(get::GetCommand::parse(parser)?.execute(db)),
+        "set" => Ok(set::SetCommand::parse(parser)
+            .with_context(|| format!("Failed to parse set command: {}", full_command))?
+            .execute(db)),
+        cmd => Err(anyhow!("Unknown command {cmd}")),
     }
 }
