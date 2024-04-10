@@ -1523,6 +1523,7 @@ dependencies = [
  "crossbeam",
  "itertools",
  "multipeek",
+ "tokio",
 ]
 
 [[package]]

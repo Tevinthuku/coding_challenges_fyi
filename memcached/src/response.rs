@@ -42,6 +42,7 @@ impl Response {
                 bytes.extend_from_slice(response.as_bytes());
                 bytes.extend_from_slice(&value.data);
                 bytes.extend_from_slice(b"\r\n");
+                bytes.extend_from_slice("END\r\n".as_bytes());
                 bytes
             }
             Response::Error(message) => format!("ERROR {}\r\n", message).into_bytes(),
