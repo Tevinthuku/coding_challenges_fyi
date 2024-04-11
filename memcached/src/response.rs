@@ -11,6 +11,7 @@ pub struct ValueResponse {
 pub enum Response {
     Stored,
     NoReply,
+    NotStored,
     End,
     Value(ValueResponse),
     Error(String),
@@ -31,6 +32,7 @@ impl Response {
     pub fn into_bytes(self) -> Vec<u8> {
         match self {
             Response::Stored => b"STORED\r\n".to_vec(),
+            Response::NotStored => b"NOT_STORED\r\n".to_vec(),
             Response::NoReply => Vec::new(),
             Response::End => b"END\r\n".to_vec(),
             Response::Value(value) => {

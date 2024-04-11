@@ -3,7 +3,12 @@ use itertools::Itertools;
 use multipeek::multipeek;
 
 use crate::{db::Db, response::Response};
-pub mod get;
+mod add;
+mod append;
+pub mod extractors;
+mod get;
+mod prepend;
+mod replace;
 mod set;
 
 pub struct Parser {
@@ -84,10 +89,30 @@ pub fn execute_command(data: &[u8], db: &Db) -> anyhow::Result<Response> {
     println!("Executing command: {}", full_command);
     let command = parser.next_string().ok_or(anyhow!("Expected a command"))?;
     match command.as_str() {
-        "get" => Ok(get::GetCommand::parse(parser)?.execute(db)),
+        "get" => Ok(get::GetCommand::parse(parser)
+            .with_context(|| format!("Failed to parse set command: {}", full_command))?
+            .execute(db)),
+
         "set" => Ok(set::SetCommand::parse(parser)
             .with_context(|| format!("Failed to parse set command: {}", full_command))?
             .execute(db)),
+
+        "add" => Ok(add::AddCommand::parse(parser)
+            .with_context(|| format!("Failed to parse add command: {}", full_command))?
+            .execute(db)),
+
+        "replace" => Ok(replace::ReplaceCommand::parse(parser)
+            .with_context(|| format!("Failed to parse replace command: {}", full_command))?
+            .execute(db)),
+
+        "append" => Ok(append::AppendCommand::parse(parser)
+            .with_context(|| format!("Failed to parse append command: {}", full_command))?
+            .execute(db)),
+
+        "prepend" => Ok(prepend::Prepend::parse(parser)
+            .with_context(|| format!("Failed to parse prepend command: {}", full_command))?
+            .execute(db)),
+
         cmd => Err(anyhow!("Unknown command {cmd}")),
     }
 }
