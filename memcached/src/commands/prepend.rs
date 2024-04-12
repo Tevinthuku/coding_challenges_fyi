@@ -1,6 +1,7 @@
 use std::mem;
 
 use itertools::Itertools;
+use linked_hash_map::Entry;
 
 use crate::{db::Db, response::Response};
 
@@ -29,14 +30,14 @@ impl Prepend {
                     .collect_vec();
             });
             match entry {
-                std::collections::hash_map::Entry::Occupied(_) => {
+                Entry::Occupied(_) => {
                     if self.data.noreply {
                         Response::NoReply
                     } else {
                         Response::Stored
                     }
                 }
-                std::collections::hash_map::Entry::Vacant(_) => Response::NotStored,
+                Entry::Vacant(_) => Response::NotStored,
             }
         })
     }

@@ -1,4 +1,5 @@
 use crate::{db::Db, response::Response};
+use linked_hash_map::Entry;
 
 use super::{extractors::ExtractedData, Parser};
 
@@ -19,14 +20,14 @@ impl AppendCommand {
                 content.data.extend(self.data.content);
             });
             match entry {
-                std::collections::hash_map::Entry::Occupied(_) => {
+                Entry::Occupied(_) => {
                     if self.data.noreply {
                         Response::NoReply
                     } else {
                         Response::Stored
                     }
                 }
-                std::collections::hash_map::Entry::Vacant(_) => Response::NotStored,
+                Entry::Vacant(_) => Response::NotStored,
             }
         })
     }

@@ -15,8 +15,8 @@ use tokio::sync::mpsc::Sender;
 
 use crate::db::Db;
 
-pub async fn run(tcp_listener: TcpListener, shut_down: impl Future) -> anyhow::Result<()> {
-    let db = Arc::new(Db::new());
+pub async fn run(tcp_listener: TcpListener, cache_size: u64, shut_down: impl Future) -> anyhow::Result<()> {
+    let db = Arc::new(Db::new(cache_size));
     let (shut_down_signal_sender, _) = tokio::sync::broadcast::channel(1);
     let (shut_down_complete_sender, mut shut_down_complete_receiver) =
         tokio::sync::mpsc::channel::<()>(1);

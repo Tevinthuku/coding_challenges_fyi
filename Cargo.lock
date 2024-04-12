@@ -1522,6 +1522,7 @@ dependencies = [
  "bytes",
  "crossbeam",
  "itertools",
+ "linked-hash-map",
  "multipeek",
  "tokio",
 ]
