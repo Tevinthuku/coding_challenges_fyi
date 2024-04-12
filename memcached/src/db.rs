@@ -6,27 +6,32 @@ use std::{
 use linked_hash_map::LinkedHashMap;
 use tokio::sync::Notify;
 
+#[derive(Clone)]
 pub struct Db {
     inner: Arc<DbInner>,
 }
 
-// pub(crate) struct DbDropGuard {
-//     db: Db,
-// }
+pub(crate) struct DbDropGuard {
+    db: Db,
+}
 
-// impl DbDropGuard {
-//     pub fn new(max_cache_size_in_bytes: u64) -> Self {
-//         Self {
-//             db: Db::new(max_cache_size_in_bytes),
-//         }
-//     }
-// }
+impl DbDropGuard {
+    pub fn new(max_cache_size_in_bytes: u64) -> Self {
+        Self {
+            db: Db::new(max_cache_size_in_bytes),
+        }
+    }
 
-// impl Drop for DbDropGuard {
-//     fn drop(&mut self) {
-//         self.db.signal_shut_down();
-//     }
-// }
+    pub fn db(&self) -> Db {
+        self.db.clone()
+    }
+}
+
+impl Drop for DbDropGuard {
+    fn drop(&mut self) {
+        self.db.signal_shut_down();
+    }
+}
 
 // TODO: Setup a special HashMap that will allow us to store the data in a hashmap and also keep track of the oldest data to be removed once the cache size is above the threshold
 
@@ -86,6 +91,7 @@ impl Db {
         data.shut_down = true;
         drop(data);
         self.inner.background_task.notify_one();
+        println!("Signaled shut down");
     }
 }
 
@@ -121,6 +127,7 @@ async fn purge_older_keys_if_cache_size_is_above_threshold_task(db: Arc<DbInner>
 
 fn remove_old_entries(db: &DbInner) {
     let data = db.data.read().unwrap();
+    println!("Here");
     let current_content_byte_size = data
         .entries
         .values()

@@ -1,6 +1,6 @@
-use std::{future::Future, sync::Arc};
+use std::future::Future;
 
-use crate::{anyhow, commands, response};
+use crate::{anyhow, commands, db::DbDropGuard, response};
 use anyhow::Context;
 use bytes::{BufMut, BytesMut};
 use tokio::{
@@ -15,8 +15,12 @@ use tokio::sync::mpsc::Sender;
 
 use crate::db::Db;
 
-pub async fn run(tcp_listener: TcpListener, cache_size: u64, shut_down: impl Future) -> anyhow::Result<()> {
-    let db = Arc::new(Db::new(cache_size));
+pub async fn run(
+    tcp_listener: TcpListener,
+    cache_size: u64,
+    shut_down: impl Future,
+) -> anyhow::Result<()> {
+    let db = DbDropGuard::new(cache_size);
     let (shut_down_signal_sender, _) = tokio::sync::broadcast::channel(1);
     let (shut_down_complete_sender, mut shut_down_complete_receiver) =
         tokio::sync::mpsc::channel::<()>(1);
@@ -52,7 +56,7 @@ pub async fn run(tcp_listener: TcpListener, cache_size: u64, shut_down: impl Fut
 
 struct Listener {
     tcp_listener: TcpListener,
-    db: Arc<Db>,
+    db: DbDropGuard,
     // notifies connections all of which subscribed to the broadcast sender that the server is shutting down.
     shut_down_signal: BroadCastSender<()>,
     // goes out of scope once the ConnectionHandler is dropped, thus signals to the server that it is finally safe to shut down once all senders are dropped.
@@ -72,7 +76,7 @@ impl Listener {
                 connection: Connection {
                     stream,
                     buffer: BytesMut::with_capacity(1024),
-                    db: self.db.clone(),
+                    db: self.db.db(),
                 },
                 shut_down_signal: self.shut_down_signal.subscribe(),
                 _shut_down_complete: self._shut_down_complete.clone(),
@@ -103,7 +107,7 @@ impl ConnectionHandler {
 
 struct Connection {
     stream: TcpStream,
-    db: Arc<Db>,
+    db: Db,
     buffer: BytesMut,
 }
 
