@@ -10,6 +10,24 @@ pub struct Db {
     inner: Arc<DbInner>,
 }
 
+// pub(crate) struct DbDropGuard {
+//     db: Db,
+// }
+
+// impl DbDropGuard {
+//     pub fn new(max_cache_size_in_bytes: u64) -> Self {
+//         Self {
+//             db: Db::new(max_cache_size_in_bytes),
+//         }
+//     }
+// }
+
+// impl Drop for DbDropGuard {
+//     fn drop(&mut self) {
+//         self.db.signal_shut_down();
+//     }
+// }
+
 // TODO: Setup a special HashMap that will allow us to store the data in a hashmap and also keep track of the oldest data to be removed once the cache size is above the threshold
 
 struct DbInner {
@@ -41,7 +59,7 @@ impl Db {
         };
 
         let inner = Arc::new(db);
-        tokio::spawn(purge_older_keys_if_cache_size_is_above_threshold(
+        tokio::spawn(purge_older_keys_if_cache_size_is_above_threshold_task(
             inner.clone(),
         ));
         Self { inner }
@@ -51,7 +69,9 @@ impl Db {
     where
         F: FnOnce(&mut LinkedHashMap<String, Content>) -> T,
     {
-        f(&mut self.inner.data.write().unwrap().entries)
+        let result = f(&mut self.inner.data.write().unwrap().entries);
+        self.inner.background_task.notify_one();
+        result
     }
 
     pub fn with_data<F, T>(&self, f: F) -> T
@@ -59,6 +79,13 @@ impl Db {
         F: FnOnce(&LinkedHashMap<String, Content>) -> T,
     {
         f(&self.inner.data.read().unwrap().entries)
+    }
+
+    fn signal_shut_down(&self) {
+        let mut data = self.inner.data.write().unwrap();
+        data.shut_down = true;
+        drop(data);
+        self.inner.background_task.notify_one();
     }
 }
 
@@ -83,34 +110,40 @@ impl Content {
     }
 }
 
-async fn purge_older_keys_if_cache_size_is_above_threshold(db: Arc<DbInner>) {
+async fn purge_older_keys_if_cache_size_is_above_threshold_task(db: Arc<DbInner>) {
     while !db.is_shutting_down() {
+        remove_old_entries(&db);
         db.background_task.notified().await;
-        let data = db.data.read().unwrap();
-        let current_content_byte_size = data
-            .entries
-            .values()
-            .map(|data| data.byte_count as u64)
-            .sum::<u64>();
-        let cache_size = data.max_cache_size_in_bytes;
-        if current_content_byte_size > cache_size {
-            // using i64 because we can go below 0
-            let mut min_bytes_to_remove = (current_content_byte_size - cache_size) as i64;
-            let mut keys_to_remove = Vec::new();
-            // linked hashmap maintains insertion order, so iter() gives us the oldest data first.
-            for (key, value) in data.entries.iter() {
-                if min_bytes_to_remove <= 0 {
-                    break;
-                }
-                min_bytes_to_remove -= value.byte_count as i64;
-                keys_to_remove.push(key.clone());
+        println!("Notified");
+    }
+    println!("Shutting down old entry removing background task")
+}
+
+fn remove_old_entries(db: &DbInner) {
+    let data = db.data.read().unwrap();
+    let current_content_byte_size = data
+        .entries
+        .values()
+        .map(|data| data.byte_count as u64)
+        .sum::<u64>();
+    let cache_size = data.max_cache_size_in_bytes;
+    if current_content_byte_size > cache_size {
+        // using i64 because we can go below 0
+        let mut min_bytes_to_remove = (current_content_byte_size - cache_size) as i64;
+        let mut keys_to_remove = Vec::new();
+        // linked hashmap maintains insertion order, so iter() gives us the oldest data first.
+        for (key, value) in data.entries.iter() {
+            if min_bytes_to_remove <= 0 {
+                break;
             }
-            // dropping the read lock.
-            drop(data);
-            let mut content = db.data.write().unwrap();
-            for key in keys_to_remove {
-                content.entries.remove(&key);
-            }
+            min_bytes_to_remove -= value.byte_count as i64;
+            keys_to_remove.push(key.clone());
+        }
+        // dropping the read lock.
+        drop(data);
+        let mut content = db.data.write().unwrap();
+        for key in keys_to_remove {
+            content.entries.remove(&key);
         }
     }
 }
