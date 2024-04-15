@@ -33,8 +33,6 @@ impl Drop for DbDropGuard {
     }
 }
 
-// TODO: Setup a special HashMap that will allow us to store the data in a hashmap and also keep track of the oldest data to be removed once the cache size is above the threshold
-
 struct DbInner {
     data: RwLock<DbState>,
     background_task: Notify,
@@ -89,8 +87,7 @@ impl Db {
     fn signal_shut_down(&self) {
         let mut data = self.inner.data.write().unwrap();
         data.shut_down = true;
-        drop(data);
-        self.inner.background_task.notify_one();
+        // self.inner.background_task.notify_one();
         println!("Signaled shut down");
     }
 }
@@ -127,7 +124,6 @@ async fn purge_older_keys_if_cache_size_is_above_threshold_task(db: Arc<DbInner>
 
 fn remove_old_entries(db: &DbInner) {
     let data = db.data.read().unwrap();
-    println!("Here");
     let current_content_byte_size = data
         .entries
         .values()
@@ -138,19 +134,17 @@ fn remove_old_entries(db: &DbInner) {
         // using i64 because we can go below 0
         let mut min_bytes_to_remove = (current_content_byte_size - cache_size) as i64;
         let mut keys_to_remove = Vec::new();
-        // linked hashmap maintains insertion order, so iter() gives us the oldest data first.
+        // linked hashmap maintains insertion order, so iter() gives us the oldest data first which is what we want to remove
         for (key, value) in data.entries.iter() {
             if min_bytes_to_remove <= 0 {
                 break;
             }
             min_bytes_to_remove -= value.byte_count as i64;
-            keys_to_remove.push(key.clone());
+            keys_to_remove.push(key);
         }
-        // dropping the read lock.
-        drop(data);
         let mut content = db.data.write().unwrap();
         for key in keys_to_remove {
-            content.entries.remove(&key);
+            content.entries.remove(key);
         }
     }
 }
