@@ -184,9 +184,7 @@ async fn purge_older_keys_if_cache_size_is_above_threshold_task(db: Arc<DbInner>
     while !db.is_shutting_down() {
         remove_old_entries(&db);
         db.background_task.notified().await;
-        println!("Notified");
     }
-    println!("Shutting down old entry removing background task")
 }
 
 fn remove_old_entries(db: &DbInner) {
