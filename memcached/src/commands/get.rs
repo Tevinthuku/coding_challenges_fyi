@@ -14,14 +14,10 @@ impl GetCommand {
     }
 
     pub fn execute(self, db: &Db) -> Response {
-        db.with_data(|data| {
-            let content = data.get(&self.key);
-            match content {
-                Some(content) if !content.is_expired() => {
-                    Response::Value((content, self.key).into())
-                }
-                _ => Response::End,
-            }
-        })
+        let content = db.get(&self.key);
+        content
+            .as_ref()
+            .map(|content| Response::Value((content, self.key).into()))
+            .unwrap_or(Response::End)
     }
 }

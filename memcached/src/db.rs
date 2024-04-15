@@ -145,11 +145,25 @@ impl Db {
         result
     }
 
-    pub fn with_data<F, T>(&self, f: F) -> T
+    fn with_data<F, T>(&self, f: F) -> T
     where
         F: FnOnce(&MapWithByteSizeCount) -> T,
     {
         f(&self.inner.data.read().unwrap().entries)
+    }
+
+    pub fn get(&self, key: &str) -> Option<Content> {
+        let content = self.with_data(|data| data.get(key).cloned());
+        if let Some(content) = content {
+            if content.is_expired() {
+                self.with_data_mut(|data| {
+                    data.remove(key);
+                });
+                return None;
+            }
+            return Some(content);
+        }
+        None
     }
 
     fn signal_shut_down(&self) {
@@ -159,6 +173,7 @@ impl Db {
     }
 }
 
+#[derive(Clone)]
 pub struct Content {
     pub data: Vec<u8>,
     pub byte_count: usize,
