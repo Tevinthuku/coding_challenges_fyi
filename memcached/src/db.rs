@@ -1,8 +1,10 @@
 use std::{
+    mem,
     sync::{Arc, RwLock},
     time::Duration,
 };
 
+use itertools::Itertools;
 use linked_hash_map::LinkedHashMap;
 use tokio::sync::Notify;
 
@@ -47,14 +49,80 @@ impl DbInner {
 struct DbState {
     max_cache_size_in_bytes: u64,
     shut_down: bool,
-    entries: LinkedHashMap<String, Content>,
+    entries: MapWithByteSizeCount,
+}
+
+// We want to keep track of the byte size of the content so that we can remove the oldest content if the cache size exceeds the max_cache_size_in_bytes
+// The LinkedHashMap maintains insertion order, so we can remove the oldest content first
+// the byte_count field provides a single lookup to get the total byte size of the content stored in the map
+#[derive(Default)]
+pub struct MapWithByteSizeCount {
+    map: LinkedHashMap<String, Content>,
+    byte_count: u64,
+}
+
+impl MapWithByteSizeCount {
+    fn new() -> Self {
+        Self {
+            map: LinkedHashMap::new(),
+            byte_count: 0,
+        }
+    }
+
+    pub fn insert(&mut self, key: String, value: Content) {
+        self.byte_count += value.byte_count as u64;
+        self.map.insert(key, value);
+    }
+
+    pub fn get(&self, key: &str) -> Option<&Content> {
+        self.map.get(key)
+    }
+
+    pub fn iter(&self) -> linked_hash_map::Iter<String, Content> {
+        self.map.iter()
+    }
+
+    pub fn contains_key(&self, key: &str) -> bool {
+        self.map.contains_key(key)
+    }
+
+    pub fn remove(&mut self, key: &str) {
+        if let Some(content) = self.map.remove(key) {
+            self.byte_count -= content.byte_count as u64;
+        }
+    }
+
+    /// Returns true if the key existed and the value was prepended, otherwise false
+    pub fn prepend(&mut self, key: &str, value: Content) -> bool {
+        if let Some(content) = self.map.get_mut(key) {
+            let existing_content = mem::take(&mut content.data);
+            content.data = value.data.into_iter().chain(existing_content).collect_vec();
+            content.byte_count += value.byte_count;
+            self.byte_count += value.byte_count as u64;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Returns true if the key existed and the value was appended, otherwise false
+    pub fn append(&mut self, key: &str, value: Content) -> bool {
+        if let Some(content) = self.map.get_mut(key) {
+            content.data.extend(value.data);
+            content.byte_count += value.byte_count;
+            self.byte_count += value.byte_count as u64;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl Db {
     pub fn new(max_cache_size_in_bytes: u64) -> Self {
         let db = DbInner {
             data: RwLock::new(DbState {
-                entries: LinkedHashMap::new(),
+                entries: MapWithByteSizeCount::new(),
                 max_cache_size_in_bytes,
                 shut_down: false,
             }),
@@ -70,7 +138,7 @@ impl Db {
 
     pub fn with_data_mut<F, T>(&self, f: F) -> T
     where
-        F: FnOnce(&mut LinkedHashMap<String, Content>) -> T,
+        F: FnOnce(&mut MapWithByteSizeCount) -> T,
     {
         let result = f(&mut self.inner.data.write().unwrap().entries);
         self.inner.background_task.notify_one();
@@ -79,7 +147,7 @@ impl Db {
 
     pub fn with_data<F, T>(&self, f: F) -> T
     where
-        F: FnOnce(&LinkedHashMap<String, Content>) -> T,
+        F: FnOnce(&MapWithByteSizeCount) -> T,
     {
         f(&self.inner.data.read().unwrap().entries)
     }
@@ -87,8 +155,7 @@ impl Db {
     fn signal_shut_down(&self) {
         let mut data = self.inner.data.write().unwrap();
         data.shut_down = true;
-        // self.inner.background_task.notify_one();
-        println!("Signaled shut down");
+        self.inner.background_task.notify_one();
     }
 }
 
@@ -124,11 +191,7 @@ async fn purge_older_keys_if_cache_size_is_above_threshold_task(db: Arc<DbInner>
 
 fn remove_old_entries(db: &DbInner) {
     let data = db.data.read().unwrap();
-    let current_content_byte_size = data
-        .entries
-        .values()
-        .map(|data| data.byte_count as u64)
-        .sum::<u64>();
+    let current_content_byte_size = data.entries.byte_count;
     let cache_size = data.max_cache_size_in_bytes;
     if current_content_byte_size > cache_size {
         // using i64 because we can go below 0
