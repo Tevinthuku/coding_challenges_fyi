@@ -52,7 +52,7 @@ struct DbState {
     entries: MapWithByteSizeCount,
 }
 
-// We want to keep track of the byte size of the content so that we can remove the oldest content if the cache size exceeds the max_cache_size_in_bytes
+// We want to keep track of the byte size of the content so that we can remove the oldest content if the entire content byte count exceeds the max_cache_size_in_bytes
 // The LinkedHashMap maintains insertion order, so we can remove the oldest content first
 // the byte_count field provides a single lookup to get the total byte size of the content stored in the map
 #[derive(Default)]
