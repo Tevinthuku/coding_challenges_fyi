@@ -1,4 +1,24 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
+
+use super::Ip;
+
+#[derive(Debug, Clone, Default)]
+pub struct IpRateLimiter {
+    buckets: HashMap<Ip, TokenBucket>,
+}
+
+impl IpRateLimiter {
+    pub fn consume_token(&mut self, ip: Ip) -> bool {
+        let bucket = self
+            .buckets
+            .entry(ip)
+            .or_insert_with(|| TokenBucket::new(10, 1));
+        bucket.consume_token()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct TokenBucket {
