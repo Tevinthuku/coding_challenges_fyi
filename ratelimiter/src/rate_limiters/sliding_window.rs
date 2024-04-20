@@ -55,3 +55,23 @@ impl Window {
         can_consume_token
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::IpRateLimiter;
+
+    #[test]
+    fn test_ip_rate_limiter() {
+        let mut rate_limiter = IpRateLimiter {
+            window_duration: Some(Duration::from_secs(60)),
+            max_requests_in_window: Some(1),
+            ..Default::default()
+        };
+        let ip = "192.168.123.132";
+        assert!(rate_limiter.consume_token(ip.into()));
+        // only 1 token can be consumed in 60 seconds.
+        assert!(!rate_limiter.consume_token(ip.into()));
+    }
+}
