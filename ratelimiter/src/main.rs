@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 
 use actix_web::{get, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
-use ratelimiter::rate_limiters::sliding_window::IpRateLimiter;
+use ratelimiter::rate_limiters::sliding_window_counter::IpRateLimiter;
 
 #[get("/limited")]
 async fn limited(data: web::Data<AppStateWithIpRateLimiter>, req: HttpRequest) -> impl Responder {
