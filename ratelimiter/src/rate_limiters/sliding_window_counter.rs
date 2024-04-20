@@ -59,7 +59,8 @@ impl SlidingWindowCounter {
         let previous_window_percentage_to_consider = 1.0 - current_window_percentage_consumed;
         let previous_requests_count_to_consider = (previous_window_percentage_to_consider
             * data.previous_requests_count as f64)
-            .round() as usize;
+            // we are using .floor so that we consider a full request from the previous window count.
+            .floor() as usize;
 
         let total_requests_count_to_consider =
             data.window.count + previous_requests_count_to_consider;
@@ -185,7 +186,7 @@ mod tests {
                 },
             ))),
         };
-        for _ in current_window_count..max_requests_in_window - 1 {
+        for _ in current_window_count..max_requests_in_window {
             assert!(ip_rate_limiter.consume_token(ip.to_owned()));
         }
         assert!(!ip_rate_limiter.consume_token(ip.to_owned()));
