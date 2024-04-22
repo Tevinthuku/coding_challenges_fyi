@@ -7,5 +7,7 @@ edition = "2021"
 
 [dependencies]
 actix-web = "4"
+anyhow = "1.0.82"
 chrono = "0.4.38"
+redis = { version = "0.25.3", features = ["aio", "connection-manager", "tokio-comp", "json"] }
 tokio = { version = "1.37.0", features = ["full"] }

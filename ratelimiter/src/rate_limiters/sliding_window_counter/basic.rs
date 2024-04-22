@@ -6,33 +6,39 @@ use std::{
 
 use chrono::{DateTime, Utc};
 
-use super::Ip;
+use crate::rate_limiters::Ip;
 
-struct Window {
-    expiry_date_time: DateTime<Utc>,
-    max_requests_in_window: usize,
-    count: usize,
+#[derive(Clone, Default)]
+pub struct IpRateLimiter {
+    window_duration: Option<Duration>,
+    max_requests_in_window: Option<usize>,
+    buckets: HashMap<Ip, SlidingWindowCounter>,
 }
 
-impl Window {
-    fn new(duration: Duration, max_requests_in_window: usize) -> Self {
+impl IpRateLimiter {
+    pub fn new(window_duration: Option<Duration>, max_requests_in_window: Option<usize>) -> Self {
         Self {
-            expiry_date_time: Utc::now() + duration,
+            window_duration,
             max_requests_in_window,
-            count: 0,
+            buckets: HashMap::new(),
         }
     }
-    fn is_expired(&self) -> bool {
-        Utc::now() > self.expiry_date_time
-    }
+    pub fn consume_token(&mut self, ip: Ip) -> bool {
+        let bucket = self.buckets.entry(ip).or_insert_with(|| {
+            let window_duration = self.window_duration.unwrap_or(Duration::from_secs(60));
+            let max_requests_in_window = self.max_requests_in_window.unwrap_or(60);
 
-    fn is_full(&self) -> bool {
-        self.count >= self.max_requests_in_window
+            SlidingWindowCounter {
+                window_duration,
+                max_requests_in_window,
+                data: Arc::new(Mutex::new(WindowWithPreviousRequestsCount {
+                    window: Window::new(window_duration, max_requests_in_window),
+                    previous_requests_count: 0,
+                })),
+            }
+        });
+        bucket.consume_token()
     }
-}
-struct WindowWithPreviousRequestsCount {
-    window: Window,
-    previous_requests_count: usize,
 }
 
 #[derive(Clone)]
@@ -74,36 +80,30 @@ impl SlidingWindowCounter {
     }
 }
 
-#[derive(Clone, Default)]
-pub struct IpRateLimiter {
-    window_duration: Option<Duration>,
-    max_requests_in_window: Option<usize>,
-    buckets: HashMap<Ip, SlidingWindowCounter>,
+struct WindowWithPreviousRequestsCount {
+    window: Window,
+    previous_requests_count: usize,
+}
+struct Window {
+    expiry_date_time: DateTime<Utc>,
+    max_requests_in_window: usize,
+    count: usize,
 }
 
-impl IpRateLimiter {
-    pub fn new(window_duration: Option<Duration>, max_requests_in_window: Option<usize>) -> Self {
+impl Window {
+    fn new(duration: Duration, max_requests_in_window: usize) -> Self {
         Self {
-            window_duration,
+            expiry_date_time: Utc::now() + duration,
             max_requests_in_window,
-            buckets: HashMap::new(),
+            count: 0,
         }
     }
-    pub fn consume_token(&mut self, ip: Ip) -> bool {
-        let bucket = self.buckets.entry(ip).or_insert_with(|| {
-            let window_duration = self.window_duration.unwrap_or(Duration::from_secs(60));
-            let max_requests_in_window = self.max_requests_in_window.unwrap_or(60);
+    fn is_expired(&self) -> bool {
+        Utc::now() > self.expiry_date_time
+    }
 
-            SlidingWindowCounter {
-                window_duration,
-                max_requests_in_window,
-                data: Arc::new(Mutex::new(WindowWithPreviousRequestsCount {
-                    window: Window::new(window_duration, max_requests_in_window),
-                    previous_requests_count: 0,
-                })),
-            }
-        });
-        bucket.consume_token()
+    fn is_full(&self) -> bool {
+        self.count >= self.max_requests_in_window
     }
 }
 
