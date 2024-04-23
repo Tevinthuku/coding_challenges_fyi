@@ -3,6 +3,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context};
 use redis::aio::ConnectionManager;
 
+#[derive(Clone)]
 pub struct DistributedSlidingWindowCounter {
     client: ConnectionManager,
     window_duration: Duration,
@@ -10,23 +11,16 @@ pub struct DistributedSlidingWindowCounter {
 }
 
 impl DistributedSlidingWindowCounter {
-    /// Create a new DistributedSlidingWindowCounter
-    ///
-    /// if `window_duration` is not provided, it defaults to 60 seconds
-    ///
-    /// if `max_window_tokens` is not provided, it defaults to 60 tokens
-    pub async fn new(
-        window_duration: Option<Duration>,
-        max_window_tokens: Option<usize>,
-    ) -> anyhow::Result<Self> {
+    pub async fn new() -> anyhow::Result<Self> {
         let url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1/".to_owned());
         let client = redis::Client::open(url).context("Failed to create redis client")?;
         let conn_manager = ConnectionManager::new(client)
             .await
             .context("Failed to create connection manager")?;
 
-        let window_duration = window_duration.unwrap_or(Duration::from_secs(60));
-        let max_window_tokens = max_window_tokens.unwrap_or(60);
+        let window_duration = Duration::from_secs(60);
+        let max_window_tokens = 60;
+
         Ok(Self {
             client: conn_manager,
             window_duration,
@@ -60,7 +54,8 @@ impl DistributedSlidingWindowCounter {
                     .ignore()
                     .set("previous_window_count", current_window_count.unwrap_or(0))
                     .ignore()
-                    .mget(&["current_window_count", "previous_window_count"])
+                    .get("current_window_count")
+                    .get("previous_window_count")
                     .query_async(&mut self.client)
                     .await
                     .context("Failed to set values in the DB")?;
