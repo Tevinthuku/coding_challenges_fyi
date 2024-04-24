@@ -9,6 +9,7 @@ members = [
     "json-parser",
     "load-balancer", 
     "memcached",
+    "ratelimiter",
     "redis-server",
     "shell",
     "sort-tool",
