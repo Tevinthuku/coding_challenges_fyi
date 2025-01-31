@@ -22,7 +22,9 @@ async fn run_server(
     file_directory: String,
     shutdown: impl Future,
 ) -> std::io::Result<()> {
-    let (sender, receiver) = bounded::<TcpStream>(10000);
+    let stream_capacity = env::var("STREAM_CAPACITY").unwrap_or("5000".to_owned());
+    let stream_capacity = stream_capacity.parse::<usize>().unwrap_or(5000);
+    let (sender, receiver) = bounded::<TcpStream>(stream_capacity);
 
     let available_parallelism = std::thread::available_parallelism().map_or(2, NonZeroUsize::get);
 
@@ -104,7 +106,9 @@ async fn handle_tcp_stream(mut stream: TcpStream, file_directory: String) -> std
 
         let path = Path::new(&file_directory).join(path);
 
-        if !path.starts_with(&file_directory) {
+        let base = tokio::fs::canonicalize(&file_directory).await?;
+        let target = tokio::fs::canonicalize(&path).await?;
+        if !target.starts_with(&base) {
             let mut response = BytesMut::with_capacity(512);
             response.put_slice(request.http_version);
             response.put_slice(b" 403 Forbidden\r\n\r\n");
