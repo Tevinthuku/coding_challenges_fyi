@@ -32,7 +32,7 @@ async fn run_server(
     for _ in 0..available_parallelism {
         let receiver = receiver.clone();
         let file_directory = file_directory.clone();
-        let thread = std::thread::spawn(move || process_requests(receiver, file_directory));
+        let thread = std::thread::spawn(move || process_streams(receiver, file_directory));
         threads.push(thread);
     }
 
@@ -69,16 +69,20 @@ async fn run_server_inner(address: &str, sender: Sender<TcpStream>) -> std::io::
     }
 }
 
-fn process_requests(receiver: Receiver<TcpStream>, file_directory: String) {
+fn process_streams(receiver: Receiver<TcpStream>, file_directory: String) {
     let rt = Builder::new_current_thread().enable_all().build().unwrap();
     rt.block_on(async move {
         for stream in receiver {
-            handle_client(stream, file_directory.clone()).await.unwrap();
+            tokio::spawn(async move {
+                if let Err(e) = handle_tcp_stream(stream, file_directory.clone()).await {
+                    eprintln!("Error handling client: {e:?}");
+                }
+            });
         }
     })
 }
 
-async fn handle_client(mut stream: TcpStream, file_directory: String) -> std::io::Result<()> {
+async fn handle_tcp_stream(mut stream: TcpStream, file_directory: String) -> std::io::Result<()> {
     let mut buffer = BytesMut::with_capacity(1024);
 
     let read_bytes = stream.read_buf(&mut buffer).await?;
