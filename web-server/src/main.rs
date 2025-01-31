@@ -8,8 +8,7 @@ use tokio::{
 };
 
 use bytes::{BufMut, BytesMut};
-use crossbeam::channel::Receiver;
-use crossbeam::channel::{unbounded, Sender};
+use crossbeam::channel::{bounded, Receiver, Sender};
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -23,7 +22,7 @@ async fn run_server(
     file_directory: String,
     shutdown: impl Future,
 ) -> std::io::Result<()> {
-    let (sender, receiver) = unbounded::<TcpStream>();
+    let (sender, receiver) = bounded::<TcpStream>(10000);
 
     let available_parallelism = std::thread::available_parallelism().map_or(2, NonZeroUsize::get);
 
@@ -73,8 +72,9 @@ fn process_streams(receiver: Receiver<TcpStream>, file_directory: String) {
     let rt = Builder::new_current_thread().enable_all().build().unwrap();
     rt.block_on(async move {
         for stream in receiver {
+            let file_directory = file_directory.clone();
             tokio::spawn(async move {
-                if let Err(e) = handle_tcp_stream(stream, file_directory.clone()).await {
+                if let Err(e) = handle_tcp_stream(stream, file_directory).await {
                     eprintln!("Error handling client: {e:?}");
                 }
             });
@@ -103,6 +103,14 @@ async fn handle_tcp_stream(mut stream: TcpStream, file_directory: String) -> std
         };
 
         let path = Path::new(&file_directory).join(path);
+
+        if !path.starts_with(&file_directory) {
+            let mut response = BytesMut::with_capacity(512);
+            response.put_slice(request.http_version);
+            response.put_slice(b" 403 Forbidden\r\n\r\n");
+            return stream.write_all(&response).await;
+        }
+
         let mut buffer = Vec::with_capacity(1024 * 1024);
         let file = File::open(path).await;
 
