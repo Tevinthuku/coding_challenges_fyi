@@ -206,9 +206,8 @@ mod tests {
     fn test_content(#[case] input: &'static str, #[case] expected: crate::frame::Frame) {
         let input = BytesMut::from(input.as_bytes());
         let result = Frame::deserialize(&input)
-            .map_err(|err| {
+            .inspect_err(|_| {
                 println!("Error deserializing: {:?}", input);
-                err
             })
             .unwrap();
         assert_eq!(result, expected);
