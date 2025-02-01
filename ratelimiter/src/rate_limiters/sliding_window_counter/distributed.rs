@@ -87,7 +87,7 @@ impl DistributedSlidingWindowCounter {
             current_window_count + previous_requests_count_to_consider;
 
         if total_requests_count_to_consider < self.max_window_tokens {
-            redis::pipe()
+            () = redis::pipe()
                 .atomic()
                 .incr("current_window_count", 1)
                 .ignore()

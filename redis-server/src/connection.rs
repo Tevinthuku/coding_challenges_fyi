@@ -88,7 +88,6 @@ impl Connection {
             Frame::Double(val) => {
                 let mut response = BytesMut::new();
                 response.put_u8(b',');
-                self.stream.write_all(&[b','])?;
                 response.extend(val.to_string().as_bytes());
                 response.put_u8(b'\r');
                 response.put_u8(b'\n');

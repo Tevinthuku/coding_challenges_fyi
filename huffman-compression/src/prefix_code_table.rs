@@ -141,12 +141,6 @@ impl Node {
     }
 }
 
-#[derive(Debug)]
-pub struct CodeAndFrequency {
-    pub frequency: usize,
-    pub code: usize,
-}
-
 fn cmp_tree_desc(a: &Tree, b: &Tree) -> Ordering {
     if b.weight() == a.weight() {
         return b.char().cmp(&a.char());
