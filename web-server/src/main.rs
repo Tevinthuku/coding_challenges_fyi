@@ -1,14 +1,14 @@
-use std::{borrow::Cow, env, future::Future, num::NonZeroUsize, path::Path};
+use bytes::{BufMut, BytesMut};
+use std::{borrow::Cow, env, future::Future, path::Path};
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::Sender;
 use tokio::{fs::File, signal};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
-    runtime::Builder,
     select,
 };
-
-use bytes::{BufMut, BytesMut};
-use crossbeam::channel::{bounded, Receiver, Sender};
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -24,44 +24,28 @@ async fn run_server(
 ) -> std::io::Result<()> {
     let stream_capacity = env::var("STREAM_CAPACITY").unwrap_or("5000".to_owned());
     let stream_capacity = stream_capacity.parse::<usize>().unwrap_or(5000);
-    let (sender, receiver) = bounded::<TcpStream>(stream_capacity);
+    let (tx, rx) = mpsc::channel::<TcpStream>(stream_capacity);
 
-    let available_parallelism = std::thread::available_parallelism().map_or(2, NonZeroUsize::get);
-
-    let mut threads = Vec::with_capacity(available_parallelism);
-
-    for _ in 0..available_parallelism {
-        let receiver = receiver.clone();
-        let file_directory = file_directory.clone();
-        let thread = std::thread::spawn(move || process_streams(receiver, file_directory));
-        threads.push(thread);
-    }
+    let stream_processor = tokio::spawn(process_streams(rx, Cow::Owned(file_directory)));
 
     select! {
-        _ = run_server_inner(address, sender.clone()) => {}
+        _ = accept_connections(address, tx.clone()) => {}
         _ = shutdown => {}
     }
 
-    drop(sender);
+    drop(tx);
 
-    for thread in threads {
-        thread.join().map_err(|err| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to join thread: {err:?}"),
-            )
-        })?;
-    }
+    let _ = stream_processor.await;
 
     Ok(())
 }
 
-async fn run_server_inner(address: &str, sender: Sender<TcpStream>) -> std::io::Result<()> {
+async fn accept_connections(address: &str, sender: Sender<TcpStream>) -> std::io::Result<()> {
     let listener = TcpListener::bind(address).await?;
 
     loop {
         let (stream, _) = listener.accept().await?;
-        sender.send(stream).map_err(|err| {
+        sender.send(stream).await.map_err(|err| {
             std::io::Error::new(
                 std::io::ErrorKind::Other,
                 format!("Failed to send stream to receiver: {err:?}"),
@@ -70,21 +54,15 @@ async fn run_server_inner(address: &str, sender: Sender<TcpStream>) -> std::io::
     }
 }
 
-fn process_streams(receiver: Receiver<TcpStream>, file_directory: String) {
-    let rt = Builder::new_current_thread().enable_all().build().unwrap();
-    rt.block_on(async move {
-        for stream in receiver {
-            let file_directory = file_directory.clone();
-            tokio::spawn(async move {
-                if let Err(e) = handle_tcp_stream(stream, file_directory).await {
-                    eprintln!("Error handling client: {e:?}");
-                }
-            });
+async fn process_streams(mut receiver: Receiver<TcpStream>, file_directory: Cow<'static, str>) {
+    while let Some(stream) = receiver.recv().await {
+        if let Err(e) = handle_tcp_stream(stream, &file_directory).await {
+            eprintln!("Error handling client: {e:?}");
         }
-    })
+    }
 }
 
-async fn handle_tcp_stream(mut stream: TcpStream, file_directory: String) -> std::io::Result<()> {
+async fn handle_tcp_stream(mut stream: TcpStream, file_directory: &str) -> std::io::Result<()> {
     let mut buffer = BytesMut::with_capacity(1024);
 
     let read_bytes = stream.read_buf(&mut buffer).await?;
@@ -104,23 +82,11 @@ async fn handle_tcp_stream(mut stream: TcpStream, file_directory: String) -> std
             path => &path[1..],
         };
 
-        let path = Path::new(&file_directory).join(path);
-
-        let base = tokio::fs::canonicalize(&file_directory).await?;
-        let target = tokio::fs::canonicalize(&path).await?;
-        if !target.starts_with(&base) {
-            let mut response = BytesMut::with_capacity(512);
-            response.put_slice(request.http_version);
-            response.put_slice(b" 403 Forbidden\r\n\r\n");
-            return stream.write_all(&response).await;
-        }
-
         let mut buffer = Vec::with_capacity(1024 * 1024);
-        let file = File::open(path).await;
 
-        let mut file = match file {
-            Ok(file) => file,
-            Err(_) => {
+        let mut file = match open_file(file_directory, path).await {
+            Some(file) => file,
+            None => {
                 let mut response = BytesMut::with_capacity(512);
                 response.put_slice(request.http_version);
                 response.put_slice(b" 404 Not Found\r\n\r\n");
@@ -164,6 +130,19 @@ struct Request<'a> {
     http_version: &'a [u8],
 }
 
+async fn open_file(file_directory: &str, path: &str) -> Option<File> {
+    let path = Path::new(file_directory).join(path);
+
+    let base = tokio::fs::canonicalize(file_directory).await.ok()?;
+    let target = tokio::fs::canonicalize(&path).await.ok()?;
+
+    if !target.starts_with(&base) {
+        return None;
+    }
+
+    File::open(path).await.ok()
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -184,7 +163,7 @@ mod tests {
             match TcpStream::connect(address).await {
                 Ok(socket) => return Ok(socket),
                 Err(err) => {
-                    if backoff > 30 {
+                    if backoff > 10 {
                         return Err(err);
                     }
                 }
