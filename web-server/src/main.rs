@@ -1,8 +1,10 @@
 use bytes::{BufMut, BytesMut};
+use std::sync::Arc;
 use std::{borrow::Cow, env, future::Future, path::Path};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::Semaphore;
 use tokio::{fs::File, signal};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -23,7 +25,12 @@ async fn run_server(
     shutdown: impl Future,
 ) -> std::io::Result<()> {
     let stream_capacity = env::var("STREAM_CAPACITY").unwrap_or("5000".to_owned());
-    let stream_capacity = stream_capacity.parse::<usize>().unwrap_or(5000);
+    let stream_capacity = stream_capacity
+        .parse::<usize>()
+        .inspect_err(|e| {
+            eprintln!("Invalid STREAM_CAPACITY: {e:?}");
+        })
+        .unwrap_or(5000);
     let (tx, rx) = mpsc::channel::<TcpStream>(stream_capacity);
 
     let stream_processor = tokio::spawn(process_streams(rx, Cow::Owned(file_directory)));
@@ -35,7 +42,9 @@ async fn run_server(
 
     drop(tx);
 
-    let _ = stream_processor.await;
+    if let Err(e) = stream_processor.await {
+        eprintln!("Stream processor shutdown error: {e:?}");
+    }
 
     Ok(())
 }
@@ -55,10 +64,18 @@ async fn accept_connections(address: &str, sender: Sender<TcpStream>) -> std::io
 }
 
 async fn process_streams(mut receiver: Receiver<TcpStream>, file_directory: Cow<'static, str>) {
+    let semaphore = Arc::new(Semaphore::new(512));
     while let Some(stream) = receiver.recv().await {
-        if let Err(e) = handle_tcp_stream(stream, &file_directory).await {
-            eprintln!("Error handling client: {e:?}");
-        }
+        let permit = semaphore.clone().acquire_owned().await.unwrap();
+        let file_directory = file_directory.clone();
+        tokio::spawn(async move {
+            // Permit is automatically released when dropped at the end of this scope
+            let _permit = permit;
+
+            if let Err(e) = handle_tcp_stream(stream, &file_directory).await {
+                eprintln!("Error handling client: {e:?}");
+            }
+        });
     }
 }
 
